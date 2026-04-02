@@ -1,157 +1,90 @@
-# Multi-Hop RAG Pipeline
+Multi-Hop RAG Pipeline
 
-A fully local, free multi-hop Retrieval-Augmented Generation pipeline powered by
-**LangChain** and **Ollama** — no API keys, no cloud services.
+A local, privacy-first Retrieval-Augmented Generation (RAG) pipeline designed to answer complex, multi-part questions. Instead of trying to answer a complicated query in a single shot, this pipeline uses an LLM to decompose the question into atomic sub-queries, fetches relevant context for each, and synthesizes a final comprehensive answer.
 
-```
-Complex Query ──► Decompose into Sub-Queries  (ChatOllama)
-                       │
-                       ▼
-               Retrieve Chunks per Sub-Query   (OllamaEmbeddings + InMemoryVectorStore)
-                       │
-                       ▼
-               Answer each Sub-Query           (ChatOllama + context)
-                       │
-                       ▼
-               Aggregate Final Answer          (ChatOllama)
-                       │
-                       ▼
-               Aggregated Score = mean cosine similarity across all retrieved chunks
-```
+Powered by LangChain, Ollama, and Qdrant, with a beautiful terminal UI using Rich.
 
----
+✨ Features
 
-## Project Structure
+Multi-Hop Reasoning: Breaks down complex queries into simple, independently answerable sub-queries.
 
-```
-rag_pipeline/
-├── src/
-│   ├── __init__.py
-│   ├── config.py            # Models, chunk size, top-k, Ollama URL
-│   ├── document_store.py    # LangChain splitter + OllamaEmbeddings + InMemoryVectorStore
-│   ├── llm.py               # ChatOllama chains for decompose / answer / aggregate
-│   ├── pipeline.py          # Orchestrator + PipelineResult dataclass
-│   └── utils.py             # Rich console + print_results()
-├── data/
-│   └── sample_doc.txt       # Drop your own .txt documents here
-├── tests/
-│   ├── __init__.py
-│   ├── test_document_store.py
-│   └── test_llm.py
-├── main.py                  # Entry point
-├── requirements.txt
-├── .gitignore
-└── README.md
-```
+100% Local & Private: Uses Ollama for both LLM generation and text embeddings. No API keys required, and your data never leaves your machine.
 
----
+Qdrant Vector Database: Extremely fast and efficient vector search. Runs entirely in-memory (or locally on disk) with zero external database setup required.
 
-## Prerequisites
+Dynamic Data Ingestion: Simply drop your .txt files into the data/ directory and they are automatically chunked and indexed.
 
-1. **Ollama** — install from https://ollama.com and start the server:
-   ```bash
-   ollama serve
-   ```
+Interactive CLI: A beautiful, real-time terminal interface that shows you exactly what the LLM is thinking at every step.
 
-2. **Pull the required models:**
-   ```bash
-   ollama pull llama3.2          # chat / reasoning
-   ollama pull nomic-embed-text  # dense embeddings
-   ```
+🛠️ Prerequisites
 
----
+Python 3.10+
 
-## Quick Start
+Ollama installed and running on your machine.
 
-```bash
-# 1. Clone / enter the project
-cd rag_pipeline
+Before running the application, ensure you have pulled the necessary Ollama models:
 
-# 2. Create and activate a virtual environment
+# Pull the default LLM (used for generation)
+ollama pull llama3.2
+
+# Pull the default embedding model (used for vector search)
+ollama pull nomic-embed-text
+
+
+🚀 Installation
+
+Clone this repository (or download the source code).
+
+(Optional but recommended) Create and activate a virtual environment:
+
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# 3. Install dependencies
+
+Install the required Python packages:
+
 pip install -r requirements.txt
 
-# 4. Run the pipeline
+
+📖 Usage
+
+Add your data: Create a folder named data/ in the root of the project (the script will automatically create it if it doesn't exist). Place any .txt files you want to query inside this folder.
+
+Start the pipeline:
+
 python main.py
-```
 
----
 
-## Configuration
+Ask questions: The interactive terminal will prompt you for a query. Try asking a complex question that requires connecting information from different parts of your documents!
 
-Edit `src/config.py` to change models or chunking parameters:
+Exit: Type exit, quit, or press Ctrl+C to stop.
 
-| Setting            | Default            | Description                        |
-|--------------------|--------------------|------------------------------------|
-| `OLLAMA_MODEL`     | `llama3.2`         | Chat / reasoning model             |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Dense embedding model            |
-| `OLLAMA_BASE_URL`  | `http://localhost:11434` | Ollama server URL           |
-| `TOP_K_CHUNKS`     | `3`                | Chunks retrieved per sub-query     |
-| `CHUNK_SIZE`       | `300`              | Characters per chunk               |
-| `CHUNK_OVERLAP`    | `50`               | Overlap between chunks             |
+🧠 How It Works (The Pipeline)
 
----
+Ingestion: The DocumentStore reads your .txt files, splits them into overlapping chunks using RecursiveCharacterTextSplitter, embeds them using OllamaEmbeddings, and stores them in a local Qdrant vector database.
 
-## Aggregated Score
+Decomposition (Hop 1): The user's complex query is sent to the LLM, which breaks it down into 2-5 simple sub-queries.
 
-The **aggregated cosine score** is the mean of every individual chunk cosine
-similarity returned across all sub-queries:
+Retrieval & Answering (Hop 2): For each sub-query, the pipeline:
 
-```
-agg_score = mean( all cosine scores from all sub-queries )
-```
+Performs a cosine similarity search in Qdrant to find the top K most relevant chunks.
 
-This is a purely retrieval-based signal — no LLM-generated confidence number.
-Scores range from 0 to 1; higher means the retrieved context was semantically
-closer to the queries on average.
+Prompts the LLM to answer that specific sub-query using only the retrieved chunks.
 
-| Score range | Interpretation          |
-|-------------|-------------------------|
-| ≥ 0.70      | Strong retrieval match  |
-| 0.40–0.69   | Moderate match          |
-| < 0.40      | Weak / off-topic match  |
+Aggregation (Hop 3): The LLM is provided with the original complex query and the list of generated sub-answers, and is tasked with synthesizing a final, cohesive response.
 
----
+⚙️ Configuration
 
-## Running Tests
+You can tweak the behavior of the pipeline by editing src/config.py.
 
-```bash
-pytest tests/ -v
-```
+OLLAMA_MODEL: The LLM used for text generation (Default: llama3.2).
 
-Tests mock both `ChatOllama` and `OllamaEmbeddings` so they run without a
-live Ollama server.
+OLLAMA_EMBED_MODEL: The model used for generating vector embeddings (Default: nomic-embed-text).
 
----
+TOP_K_CHUNKS: How many text chunks to retrieve per sub-query (Default: 3).
 
-## Adding Your Own Documents
+CHUNK_SIZE / CHUNK_OVERLAP: Text splitting parameters for your documents.
 
-```python
-# In main.py, replace SAMPLE_DOCS with file I/O:
-with open("data/my_corpus.txt") as f:
-    store.add_document("my_doc", f.read())
-```
+Persisting the Database
 
-Or loop over a directory:
-
-```python
-import pathlib
-for path in pathlib.Path("data").glob("*.txt"):
-    store.add_document(path.stem, path.read_text())
-```
-
----
-
-## LangChain Components Used
-
-| Component | Package | Purpose |
-|-----------|---------|---------|
-| `ChatOllama` | `langchain-ollama` | Local LLM chat |
-| `OllamaEmbeddings` | `langchain-ollama` | Dense text embeddings |
-| `RecursiveCharacterTextSplitter` | `langchain-text-splitters` | Smart chunking |
-| `InMemoryVectorStore` | `langchain-core` | Cosine vector retrieval |
-| `ChatPromptTemplate` | `langchain-core` | Structured prompts |
-| `StrOutputParser` | `langchain-core` | LLM → plain string |
+By default, the Qdrant database runs in :memory:, meaning the index is wiped when the script closes. If you have a large dataset and want to save the index to your hard drive to avoid re-embedding on every run, change the location parameter to path="./qdrant_db" in src/document_store.py.
