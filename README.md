@@ -87,14 +87,13 @@ ollama list   # should list your downloaded models
 
 ### 3. Qdrant (Vector Database)
 
-Qdrant stores your document embeddings. You have two options:
+Qdrant stores your document embeddings.:
 
 
 #### Qdrant Cloud 
 
 1. Sign up at [cloud.qdrant.io](https://cloud.qdrant.io)
 2. Create a cluster and copy your **API key** and **cluster URL**
-3. Store them safely — see [Keeping Secrets Safe](#keeping-secrets-safe) below
 
 ---
 
