@@ -5,6 +5,7 @@ from langchain_qdrant import QdrantVectorStore
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+# Import your new credentials from config (recommended) or hardcode them
 from src.config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
@@ -16,18 +17,11 @@ from src.utils import console
 
 @dataclass
 class Chunk:
-    """A simple dataclass to represent a chunk of text instead of Pydantic."""
     doc_id: str
     text: str
     index: int
 
-
 class DocumentStore:
-    """
-    Ingests plain-text documents, splits them into overlapping chunks,
-    embeds each chunk with Ollama, and serves top-k cosine retrieval using Qdrant.
-    """
-
     def __init__(
         self,
         chunk_size: int = CHUNK_SIZE,
@@ -47,23 +41,22 @@ class DocumentStore:
         )
         self._vectorstore: QdrantVectorStore | None = None
         self._chunks: list[Chunk] = []
+        
+        # Cloud Connection Details
+        self.qdrant_url = "https://21e6f8a8-9fbb-4555-a64b-38d547b28fb5.eu-west-2-0.aws.cloud.qdrant.io:6333"
+        self.qdrant_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6MDQ0OTQ3ZjUtNGZjZS00OTYxLWEzNWYtYzhhMDcxMTM0OTE4In0.Iszx_UnRhLV2WVdNU-U02fomGrozqs970iTIGpas1pc" # Keep this safe!
 
     def add_document(self, doc_id: str, text: str) -> None:
-        """Splits a document and stages it for index building."""
         raw_chunks = self._splitter.split_text(text.strip())
         for idx, chunk_text in enumerate(raw_chunks):
             self._chunks.append(Chunk(doc_id=doc_id, text=chunk_text.strip(), index=idx))
 
     def build_index(self) -> None:
-        """Builds the Qdrant index from staged chunks."""
         if not self._chunks:
             raise ValueError("No documents staged — call add_document() first.")
 
         n_docs = len(set(c.doc_id for c in self._chunks))
-        console.print(
-            f"  [dim]Embedding [bold]{len(self._chunks)}[/bold] chunks "
-            f"from [bold]{n_docs}[/bold] file(s) into Qdrant DB…[/dim]"
-        )
+        console.print(f"  [dim]Uploading [bold]{len(self._chunks)}[/bold] chunks to Qdrant Cloud…[/dim]")
 
         lc_docs = [
             Document(
@@ -73,29 +66,34 @@ class DocumentStore:
             for c in self._chunks
         ]
         
-        # Initializes Qdrant dynamically. 
-        # `location=":memory:"` makes it ephemeral. Replace with `path="./qdrant_db"` to persist locally.
+        # CHANGED: Now connects to the Cloud Cluster instead of RAM
         self._vectorstore = QdrantVectorStore.from_documents(
             documents=lc_docs,
             embedding=self._embeddings_fn,
-            location=":memory:", 
-            collection_name="rag_documents"
+            url=self.qdrant_url,
+            api_key=self.qdrant_api_key,
+            collection_name="rag_documents",
+            force_recreate=True # Set to False if you want to keep adding to the same index
         )
         
-        console.print(f"  [dim][green]✓[/green] Qdrant Index ready.[/dim]")
+        console.print(f"  [dim][green]✓[/green] Qdrant Cloud Index ready.[/dim]")
 
     def retrieve(
         self,
         query: str,
         top_k: int = TOP_K_CHUNKS,
     ) -> tuple[list[Chunk], list[float]]:
-        """Retrieves top-k chunks from Qdrant via cosine similarity."""
         if self._vectorstore is None:
-            raise RuntimeError("Call build_index() before retrieving.")
+            # If the app restarts, we can try to connect to the existing cloud index 
+            # instead of throwing an error
+            self._vectorstore = QdrantVectorStore.from_existing_collection(
+                embedding=self._embeddings_fn,
+                url=self.qdrant_url,
+                api_key=self.qdrant_api_key,
+                collection_name="rag_documents",
+            )
 
-        hits: list[tuple[Document, float]] = (
-            self._vectorstore.similarity_search_with_score(query, k=top_k)
-        )
+        hits = self._vectorstore.similarity_search_with_score(query, k=top_k)
 
         chunks: list[Chunk] = []
         scores: list[float] = []
