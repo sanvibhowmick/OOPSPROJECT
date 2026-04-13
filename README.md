@@ -65,6 +65,24 @@ Ollama lets you run LLMs and embedding models entirely on your machine — no AP
 
 👉 **[Download Ollama from ollama.com](https://ollama.com/download)**
 
+After installing, pull the models NeuralHop uses:
+
+```bash
+# LLM for reasoning and answering
+ollama pull llama3
+
+# Embedding model for vector search
+ollama pull nomic-embed-text
+```
+
+Confirm Ollama is running:
+
+```bash
+ollama list   # should list your downloaded models
+```
+
+> You can swap these for any other Ollama-compatible models — just update `src/config.py`.
+
 ---
 
 ### 3. Qdrant (Vector Database)
@@ -97,24 +115,7 @@ venv\Scripts\activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
-
 ```
-```bash
-# LLM for reasoning and answering
-ollama pull llama3
-
-# Embedding model for vector search
-ollama pull nomic-embed-text
-```
-
-Confirm Ollama is running:
-
-```bash
-ollama list   # should list your downloaded models
-```
-
-> You can swap these for any other Ollama-compatible models — just update `src/config.py`.
-
 
 ---
 
