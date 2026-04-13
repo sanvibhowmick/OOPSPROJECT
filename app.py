@@ -146,32 +146,6 @@ def hop_flow_svg(sub_queries: list, hop_colors: list) -> str:
     return "".join(p)
 
 
-def similarity_bars(chunks, scores, color: str) -> str:
-    if not chunks:
-        return ""
-    rows = []
-    for i, (chunk, sc) in enumerate(zip(chunks, scores)):
-        pct = min(sc * 100, 100)
-        doc = getattr(chunk, "doc_id", f"source_{i}")
-        doc = (doc[:22] + "…") if len(doc) > 22 else doc
-        rows.append(f"""
-        <div style="margin-bottom:0.55rem;">
-          <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-            <span style="font-family:'DM Mono',monospace;font-size:0.6rem;color:#4A5568;
-                         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                         max-width:150px;">{doc}</span>
-            <span style="font-family:'Syne',sans-serif;font-size:0.7rem;font-weight:700;
-                         color:{color};flex-shrink:0;margin-left:6px;">{sc:.3f}</span>
-          </div>
-          <div style="height:4px;background:#111E34;border-radius:99px;overflow:hidden;">
-            <div style="height:100%;width:{pct:.1f}%;
-                        background:linear-gradient(90deg,{color}55,{color});
-                        border-radius:99px;"></div>
-          </div>
-        </div>""")
-    return "".join(rows)
-
-
 # ──────────────────────────────────────────────────────────────────
 #  CSS
 # ──────────────────────────────────────────────────────────────────
@@ -184,15 +158,15 @@ st.markdown("""
   --surface:#07101F;
   --card:#0A1628;
   --card-hi:#0D1C34;
-  --border:rgba(255,255,255,0.05);
-  --border-hi:rgba(0,229,255,0.22);
+  --border:rgba(255,255,255,0.07);
+  --border-hi:rgba(0,229,255,0.28);
   --cyan:#00E5FF;
   --emerald:#00E676;
   --amber:#FFB300;
   --pink:#FF2D78;
   --violet:#9B59F5;
-  --text:#D8E8F5;
-  --muted:#3D5270;
+  --text:#E8F2FF;
+  --muted:#6B8AB0;
   --dim:#172136;
   --radius:16px;
   --radius-sm:10px;
@@ -281,6 +255,18 @@ html, body, [class*="css"] {
   transform: translateY(-1px) !important;
 }
 
+/* ── Delete button variant ── */
+.delete-btn > button {
+  background: linear-gradient(135deg, rgba(255,45,120,.1), rgba(255,100,50,.1)) !important;
+  border: 1px solid rgba(255,45,120,.35) !important;
+  color: #FF2D78 !important;
+}
+.delete-btn > button:hover {
+  background: linear-gradient(135deg, rgba(255,45,120,.22), rgba(255,100,50,.18)) !important;
+  border-color: #FF2D78 !important;
+  box-shadow: 0 0 28px rgba(255,45,120,.18) !important;
+}
+
 /* ── File uploader ── */
 [data-testid="stFileUploader"] {
   background: transparent !important;
@@ -328,12 +314,12 @@ html, body, [class*="css"] {
 /* ── Textarea ── */
 [data-testid="stTextArea"] textarea {
   background: #050D1A !important;
-  border: 1px solid var(--border) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
   border-radius: 8px !important;
-  color: #4A6280 !important;
+  color: #C5D5E8 !important;
   font-family: 'DM Mono', monospace !important;
-  font-size: .7rem !important;
-  line-height: 1.65 !important;
+  font-size: .85rem !important;
+  line-height: 1.7 !important;
 }
 
 /* ── Scrollbar ── */
@@ -539,11 +525,11 @@ hr { border-color: var(--border) !important; }
 .nh-answer-inner {
   background: #080E1E; border-radius: 16px;
   padding: 1.75rem 2rem;
-  font-size: 1.02rem; line-height: 1.85; color: var(--text);
+  font-size: 1.15rem; line-height: 1.85; color: var(--text);
 }
 .nh-answer-lbl {
   font-family: 'DM Mono', monospace;
-  font-size: .58rem; letter-spacing: .18em;
+  font-size: .65rem; letter-spacing: .18em;
   text-transform: uppercase; color: var(--cyan); opacity: .7; margin-bottom: .9rem;
 }
 
@@ -563,7 +549,7 @@ hr { border-color: var(--border) !important; }
   font-size: .58rem; letter-spacing: .14em;
   text-transform: uppercase; color: var(--muted); margin-bottom: .35rem;
 }
-.nh-mv2 {
+.nh-m {
   font-family: 'Syne', sans-serif;
   font-size: 1.9rem; font-weight: 800; line-height: 1;
 }
@@ -598,20 +584,46 @@ hr { border-color: var(--border) !important; }
 }
 .nh-hop-num {
   font-family: 'DM Mono', monospace;
-  font-size: .58rem; letter-spacing: .18em;
+  font-size: .65rem; letter-spacing: .18em;
   text-transform: uppercase; margin-bottom: .4rem; opacity: .7;
 }
-.nh-hop-query { font-size: 1rem; font-weight: 700; color: var(--text); margin-bottom: .85rem; }
+.nh-hop-query { font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: .85rem; }
 .nh-hop-answer {
-  font-size: .86rem; line-height: 1.65; color: #7A8EA8;
-  padding: .75rem 1rem; border-radius: 10px;
+  font-size: .95rem; line-height: 1.7; color: #A0B4CC;
+  padding: .85rem 1rem; border-radius: 10px;
   background: rgba(0,0,0,.28); margin-bottom: .85rem;
   font-family: 'DM Mono', monospace;
 }
-.nh-bars-lbl {
+
+/* Chunk display — plain & readable */
+.nh-chunk-block {
+  background: #050D1A;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin-bottom: .75rem;
+}
+.nh-chunk-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: .6rem;
+  padding-bottom: .5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.nh-chunk-source {
   font-family: 'DM Mono', monospace;
-  font-size: .58rem; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: .55rem;
+  font-size: .7rem; color: var(--muted);
+  letter-spacing: .05em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
+}
+.nh-chunk-score {
+  font-family: 'DM Mono', monospace;
+  font-size: .75rem; font-weight: 600;
+  flex-shrink: 0;
+}
+.nh-chunk-text {
+  font-family: 'DM Mono', monospace;
+  font-size: .88rem; line-height: 1.72; color: #C0D0E4;
+  white-space: pre-wrap; word-break: break-word;
 }
 
 /* History */
@@ -622,8 +634,8 @@ hr { border-color: var(--border) !important; }
   padding: 1rem 1.25rem;
   margin-bottom: .6rem;
 }
-.nh-hist-q { font-weight: 700; font-size: .88rem; margin-bottom: .35rem; }
-.nh-hist-a { font-size: .75rem; color: var(--muted); line-height: 1.55; font-family: 'DM Mono', monospace; }
+.nh-hist-q { font-weight: 700; font-size: .95rem; margin-bottom: .35rem; }
+.nh-hist-a { font-size: .82rem; color: var(--muted); line-height: 1.55; font-family: 'DM Mono', monospace; }
 
 /* Footer */
 .nh-footer {
@@ -671,7 +683,7 @@ with st.sidebar:
                 background-clip:text;margin-bottom:.3rem;">⚡ NeuralHop</div>
     <div style="font-family:'DM Mono',monospace;font-size:.55rem;color:#3D5270;
                 letter-spacing:.12em;text-transform:uppercase;margin-bottom:1.5rem;">
-      Multi-Hop RAG Engine v2
+      Multi-Hop RAG Engine 
     </div>""", unsafe_allow_html=True)
 
     st.markdown(f"""
@@ -724,7 +736,7 @@ st.markdown(f"""
     <div class="nh-logo-icon">⚡</div>
     <div>
       <div class="nh-logo-text">NeuralHop</div>
-      <div class="nh-logo-version">Multi-Hop RAG · v2</div>
+      <div class="nh-logo-version">Multi-Hop RAG · </div>
     </div>
   </div>
   <div class="nh-status-bar">
@@ -777,7 +789,6 @@ with ingest_col:
       </div>
     </div>""", unsafe_allow_html=True)
 
-    # ── FILE UPLOADER (txt + pdf) ─────────────────────────────────
     uploaded_files = st.file_uploader(
         "UPLOAD .TXT OR .PDF FILES",
         type=["txt", "pdf"],
@@ -822,13 +833,24 @@ with ingest_col:
         st.success(f"✓ Indexed {len(uploaded_files) - len(failed)} document(s)")
         st.rerun()
 
-    if st.session_state.document_store:
+    # ── DELETE DOCS BUTTON ────────────────────────────────────────
+    if st.session_state.document_store is not None:
         st.markdown("""
         <div class="nh-index-info">
           <span style="width:7px;height:7px;background:#00E676;border-radius:50%;
                 box-shadow:0 0 7px #00E676;flex-shrink:0;"></span>
           <span class="nh-index-info-text">Index is live — ready to query</span>
         </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br/>", unsafe_allow_html=True)
+
+        st.markdown('<div class="delete-btn">', unsafe_allow_html=True)
+        if st.button("🗑 Delete All Documents"):
+            st.session_state.document_store = None
+            st.session_state.history = []
+            st.success("All documents cleared from the index.")
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # Chunk config display
     st.markdown(f"""
@@ -956,16 +978,16 @@ if run and query and st.session_state.document_store:
         st.markdown(f"""
         <div class="nh-metric">
           <div class="nh-ml">Processing Time</div>
-          <div class="nh-mv2" style="color:#00E5FF;">{elapsed:.2f}
+          <div class="nh-m" style="color:#00E5FF;">{elapsed:.2f}
             <span style="font-size:.9rem;opacity:.5;">s</span></div>
         </div>
         <div class="nh-metric">
           <div class="nh-ml">Reasoning Hops</div>
-          <div class="nh-mv2" style="color:#9B59F5;">{len(sub_queries)}</div>
+          <div class="nh-m" style="color:#9B59F5;">{len(sub_queries)}</div>
         </div>
         <div class="nh-metric">
           <div class="nh-ml">Chunks Retrieved</div>
-          <div class="nh-mv2" style="color:#FFB300;">{len(all_scores)}</div>
+          <div class="nh-m" style="color:#FFB300;">{len(all_scores)}</div>
         </div>""", unsafe_allow_html=True)
 
     # ── HOP FLOW ─────────────────────────────────────────────────
@@ -986,7 +1008,6 @@ if run and query and st.session_state.document_store:
         dark = HOP_DARKS[i % len(HOP_DARKS)]
         name = HOP_NAMES[i % len(HOP_NAMES)]
 
-        bars_html = similarity_bars(res.chunks, res.chunk_scores, c)
         left_c, right_c = st.columns([3, 2], gap="medium")
 
         with left_c:
@@ -999,30 +1020,25 @@ if run and query and st.session_state.document_store:
               </div>
               <div class="nh-hop-query">{res.sub_query}</div>
               <div class="nh-hop-answer">{res.llm_answer}</div>
-              <div class="nh-bars-lbl">Chunk Relevance Scores</div>
-              {bars_html}
             </div>""", unsafe_allow_html=True)
 
         with right_c:
+            st.markdown(
+                f'<div style="font-family:\'DM Mono\',monospace;font-size:.65rem;'
+                f'letter-spacing:.14em;text-transform:uppercase;color:{c};'
+                f'opacity:.7;margin-bottom:.5rem;">◆ Retrieved Chunks</div>',
+                unsafe_allow_html=True)
+
             for idx, (chunk, sc) in enumerate(zip(res.chunks[:3], res.chunk_scores[:3])):
                 doc = getattr(chunk, "doc_id", f"doc_{idx}")
                 st.markdown(f"""
-                <div style="background:#060F1D;border:1px solid {c}1E;border-radius:12px;
-                            padding:.85rem 1rem;margin-bottom:.65rem;">
-                  <div style="display:flex;justify-content:space-between;
-                              align-items:center;margin-bottom:.5rem;">
-                    <span style="background:{c}10;border:1px solid {c}25;
-                                 border-radius:99px;padding:.18rem .6rem;
-                                 font-family:'DM Mono',monospace;font-size:.58rem;
-                                 color:{c};letter-spacing:.06em;overflow:hidden;
-                                 text-overflow:ellipsis;white-space:nowrap;
-                                 max-width:130px;">{doc[:18]}</span>
-                    <span style="font-family:'DM Mono',monospace;font-size:.65rem;
-                                 color:{c};flex-shrink:0;">↑ {sc:.3f}</span>
-                  </div>""", unsafe_allow_html=True)
-                st.text_area(label="", value=chunk.text, height=108,
-                             disabled=True, key=f"chunk_{i}_{idx}")
-                st.markdown("</div>", unsafe_allow_html=True)
+                <div class="nh-chunk-block">
+                  <div class="nh-chunk-header">
+                    <span class="nh-chunk-source">📄 {doc}</span>
+                    <span class="nh-chunk-score" style="color:{c};">score: {sc:.3f}</span>
+                  </div>
+                  <div class="nh-chunk-text">{chunk.text}</div>
+                </div>""", unsafe_allow_html=True)
 
     st.session_state.history.append(
         {"query": query, "answer": final_answer, "score": agg_score})
@@ -1047,7 +1063,7 @@ if st.session_state.history:
               <div class="nh-hist-q">↳ {h["query"]}</div>
               <div class="nh-hist-a">{h["answer"][:200]}…</div>
               <div style="margin-top:.5rem;">
-                <span style="font-family:'DM Mono',monospace;font-size:.58rem;
+                <span style="font-family:'DM Mono',monospace;font-size:.65rem;
                              color:{sc_c};letter-spacing:.1em;">SCORE {h["score"]:.3f}</span>
               </div>
             </div>""", unsafe_allow_html=True)

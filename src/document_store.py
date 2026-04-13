@@ -4,6 +4,8 @@ from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from dotenv import load_dotenv
+import os
 
 # Import your new credentials from config (recommended) or hardcode them
 from src.config import (
@@ -43,8 +45,10 @@ class DocumentStore:
         self._chunks: list[Chunk] = []
         
         # Cloud Connection Details
-        self.qdrant_url = "https://21e6f8a8-9fbb-4555-a64b-38d547b28fb5.eu-west-2-0.aws.cloud.qdrant.io:6333"
-        self.qdrant_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6MDQ0OTQ3ZjUtNGZjZS00OTYxLWEzNWYtYzhhMDcxMTM0OTE4In0.Iszx_UnRhLV2WVdNU-U02fomGrozqs970iTIGpas1pc" # Keep this safe!
+        load_dotenv()
+
+        self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
+        self.qdrant_api_key = os.getenv("QDRANT_API_KEY", None)
 
     def add_document(self, doc_id: str, text: str) -> None:
         raw_chunks = self._splitter.split_text(text.strip())

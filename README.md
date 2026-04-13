@@ -1,107 +1,204 @@
-# Multi-Hop RAG Pipeline
+# ⚡ NeuralHop — Multi-Hop RAG Engine
 
-A local, privacy-first Retrieval-Augmented Generation (RAG) pipeline designed to answer complex, multi-part questions. Instead of trying to answer a complicated query in a single shot, this pipeline uses an LLM to decompose the question into atomic sub-queries, fetches relevant context for each, and synthesizes a final comprehensive answer.
-
-Powered by **LangChain**, **Ollama**, and **Qdrant**, with a beautiful terminal UI using **Rich**.
+> Ask questions that span multiple documents. NeuralHop decomposes your query into reasoning hops, retrieves evidence from each, and synthesises a final answer — all running locally.
 
 ---
 
-## ✨ Features
+## 📋 Table of Contents
 
-- **Multi-Hop Reasoning:** Breaks down complex queries into simple, independently answerable sub-queries.
-- **100% Local & Private:** Uses Ollama for both LLM generation and text embeddings. No API keys required, and your data never leaves your machine.
-- **Qdrant Vector Database:** Extremely fast and efficient vector search. Runs entirely in-memory (or locally on disk) with zero external database setup required.
-- **Dynamic Data Ingestion:** Simply drop your `.txt` files into the `data/` directory and they are automatically chunked and indexed.
-- **Interactive CLI:** A beautiful, real-time terminal interface that shows you exactly what the LLM is thinking at every step.
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Running the App](#running-the-app)
+- [Project Structure](#project-structure)
+
 
 ---
 
-## 🛠️ Prerequisites
+## How It Works
 
-1. Python 3.10+
-2. [Ollama](https://ollama.com/) installed and running on your machine.
+```
+Your Query
+    │
+    ▼
+┌─────────────────────┐
+│  Query Decomposer   │  → breaks query into N atomic sub-queries
+└─────────────────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼  (for each sub-query)
+┌────────┐  ┌────────┐
+│Retrieve│  │  LLM   │  → fetch top-k chunks → answer sub-query
+└────────┘  └────────┘
+         │
+         ▼
+┌─────────────────────┐
+│  Answer Aggregator  │  → synthesise all hop answers into final response
+└─────────────────────┘
+```
 
-Before running the application, ensure you have pulled the necessary Ollama models:
+1. **Ingest** — Upload `.txt` or `.pdf` files. They are chunked and embedded locally via Ollama.
+2. **Index** — Chunks are stored in a Qdrant vector database for similarity search.
+3. **Query** — Your question is split into sub-queries. Each hop retrieves relevant chunks and gets an LLM answer.
+4. **Synthesise** — All hop answers are aggregated into one final response.
+
+---
+
+## Prerequisites
+
+Make sure you have all of the following installed before starting.
+
+### 1. Python 3.10+
 
 ```bash
-# Pull the default LLM (used for generation)
-ollama pull llama3.2
+python --version   # should be 3.10 or higher
+```
 
-# Pull the default embedding model (used for vector search)
+Download from [python.org](https://www.python.org/downloads/) if needed.
+
+---
+
+### 2. Ollama (Local LLM Runner)
+
+Ollama lets you run LLMs and embedding models entirely on your machine — no API key needed.
+
+👉 **[Download Ollama from ollama.com](https://ollama.com/download)**
+
+After installing, pull the models NeuralHop uses:
+
+```bash
+# LLM for reasoning and answering
+ollama pull llama3
+
+# Embedding model for vector search
 ollama pull nomic-embed-text
 ```
 
----
-
-## 🚀 Installation
-
-1. Clone this repository (or download the source code).
-
-2. *(Optional but recommended)* Create and activate a virtual environment:
+Confirm Ollama is running:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+ollama list   # should list your downloaded models
 ```
 
-3. Install the required Python packages:
+> You can swap these for any other Ollama-compatible models — just update `src/config.py`.
+
+---
+
+### 3. Qdrant (Vector Database)
+
+Qdrant stores your document embeddings. You have two options:
+
+
+#### Qdrant Cloud 
+
+1. Sign up at [cloud.qdrant.io](https://cloud.qdrant.io)
+2. Create a cluster and copy your **API key** and **cluster URL**
+3. Store them safely — see [Keeping Secrets Safe](#keeping-secrets-safe) below
+
+---
+
+## Installation
 
 ```bash
+# 1. Clone the repository
+git clone https://github.com/sanvibhowmick/OOPSPROJECT.git
+cd OOPSPROJECT
+
+# 2. Create and activate a virtual environment
+python -m venv venv
+
+# On macOS / Linux:
+source venv/bin/activate
+
+# On Windows:
+venv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
 ---
 
-## 📖 Usage
+## Configuration
 
-1. **Add your data:** Create a folder named `data/` in the root of the project (the script will automatically create it if it doesn't exist). Place any `.txt` files you want to query inside this folder.
-
-2. **Start the pipeline:**
-
-```bash
-python main.py
-```
-
-3. **Ask questions:** The interactive terminal will prompt you for a query. Try asking a complex question that requires connecting information from different parts of your documents!
-
-4. **Exit:** Type `exit`, `quit`, or press `Ctrl+C` to stop.
-
----
-
-## 🧠 How It Works (The Pipeline)
-
-1. **Ingestion:** The `DocumentStore` reads your `.txt` files, splits them into overlapping chunks using `RecursiveCharacterTextSplitter`, embeds them using `OllamaEmbeddings`, and stores them in a local `Qdrant` vector database.
-
-2. **Decomposition (Hop 1):** The user's complex query is sent to the LLM, which breaks it down into 2–5 simple sub-queries.
-
-3. **Retrieval & Answering (Hop 2):** For each sub-query, the pipeline:
-   - Performs a cosine similarity search in Qdrant to find the top `K` most relevant chunks.
-   - Prompts the LLM to answer that specific sub-query using only the retrieved chunks.
-
-4. **Aggregation (Hop 3):** The LLM is provided with the original complex query and the list of generated sub-answers, and is tasked with synthesizing a final, cohesive response.
-
----
-
-## ⚙️ Configuration
-
-You can tweak the behavior of the pipeline by editing `src/config.py`.
-
-| Parameter | Description | Default |
-|---|---|---|
-| `OLLAMA_MODEL` | The LLM used for text generation | `llama3.2` |
-| `OLLAMA_EMBED_MODEL` | The model used for generating vector embeddings | `nomic-embed-text` |
-| `TOP_K_CHUNKS` | How many text chunks to retrieve per sub-query | `3` |
-| `CHUNK_SIZE` | Text splitting chunk size | — |
-| `CHUNK_OVERLAP` | Overlap between text chunks | — |
-
-### Persisting the Database
-
-By default, the Qdrant database runs in `:memory:`, meaning the index is wiped when the script closes. If you have a large dataset and want to save the index to your hard drive to avoid re-embedding on every run, change the `location` parameter in `src/document_store.py`:
+All settings live in **`src/config.py`**. Open it and adjust to your setup:
 
 ```python
-# In-memory (default) — resets on every run
-location=":memory:"
+# ── Ollama models ──────────────────────────────────────────
+OLLAMA_MODEL        = "llama3"           # LLM used for reasoning
+OLLAMA_EMBED_MODEL  = "nomic-embed-text" # Embedding model
 
-# Persistent — survives restarts
-path="./qdrant_db"
+# ── Chunking ───────────────────────────────────────────────
+CHUNK_SIZE    = 512   # characters per chunk
+CHUNK_OVERLAP = 64    # overlap between consecutive chunks
+
+
 ```
+
+### Environment Variables (for Qdrant Cloud)
+
+Create a `.env` file in the project root:
+
+```env
+QDRANT_URL=https://your-cluster-id.qdrant.io
+QDRANT_API_KEY=your-secret-api-key-here
+```
+
+
+
+
+---
+
+## Running the App
+
+```bash
+streamlit run app.py
+```
+
+The app will open at **[http://localhost:8501](http://localhost:8501)**.
+
+**Workflow inside the app:**
+1. Upload one or more `.txt` or `.pdf` files in the left panel
+2. Click **⚡ Build Index** to chunk and embed your documents
+3. Type your question in the right panel
+4. Click **⚡ Analyze Query** and watch the hops unfold
+5. Use **🗑 Delete All Documents** to clear the index and start fresh
+
+---
+
+## Project Structure
+
+```
+neuralhop/
+│
+├── app.py                  # Streamlit UI — main entry point
+│
+├── src/
+│   ├── config.py           # Model names, chunk settings
+│   ├── document_store.py   # Chunking, embedding, Qdrant index management
+│   ├── llm.py              # Query decomposition, sub-query answering, aggregation
+│   └── pipeline.py         # Data classes: SubQueryResult, PipelineResult
+│
+├── requirements.txt        # Python dependencies
+├── .env                    # ← YOUR SECRETS (never commit this)
+├── .gitignore              # Excludes .env and other sensitive files
+└── README.md
+```
+
+---
+
+
+
+
+
+## Tech Stack
+
+| Component | Tool |
+|-----------|------|
+| UI | [Streamlit](https://streamlit.io) |
+| LLM + Embeddings | [Ollama](https://ollama.com) |
+| Vector Store | [Qdrant](https://qdrant.tech) |
+| PDF Parsing | PyMuPDF|
+
+---
