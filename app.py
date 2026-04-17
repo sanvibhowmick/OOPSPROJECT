@@ -1,12 +1,14 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import time
 import math
 import numpy as np
 
-from src.config import CHUNK_OVERLAP, CHUNK_SIZE, OLLAMA_EMBED_MODEL, OLLAMA_MODEL
+from src.config import CHUNK_OVERLAP, CHUNK_SIZE, HF_EMBED_MODEL, HF_LLM_MODEL
 from src.document_store import DocumentStore
 from src.llm import decompose_query, answer_sub_query, aggregate_answers
 from src.pipeline import SubQueryResult, PipelineResult
+
 
 # ──────────────────────────────────────────────────────────────────
 #  PDF helper
@@ -146,6 +148,95 @@ def hop_flow_svg(sub_queries: list, hop_colors: list) -> str:
     return "".join(p)
 
 
+def chunk_breakdown_html(chunk_map: dict) -> str:
+    """Return a self-contained HTML string for the per-document chunk breakdown."""
+    rows = ""
+    max_count = max(chunk_map.values()) if chunk_map else 1
+    for doc_name, count in chunk_map.items():
+        short = doc_name if len(doc_name) <= 28 else doc_name[:25] + "…"
+        bar_w = min(100, max(4, int(count / max(max_count, 1) * 100)))
+        rows += f"""
+        <div class="row">
+          <span class="doc" title="{doc_name}">📄 {short}</span>
+          <div class="bar-wrap">
+            <div class="bar" style="width:{bar_w}%"></div>
+          </div>
+          <span class="count">{count} <span class="unit">chunks</span></span>
+        </div>"""
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: #050D1A;
+    font-family: 'DM Mono', monospace;
+    padding: .85rem 1.1rem;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    margin: 0;
+  }}
+  .label {{
+    font-size: .55rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #3D5270;
+    margin-bottom: .6rem;
+  }}
+  .row {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: .35rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }}
+  .row:last-child {{ border-bottom: none; }}
+  .doc {{
+    font-size: .65rem;
+    color: #6B8AB0;
+    min-width: 160px;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }}
+  .bar-wrap {{
+    flex: 1;
+    background: rgba(255,255,255,0.05);
+    border-radius: 99px;
+    height: 5px;
+    overflow: hidden;
+  }}
+  .bar {{
+    height: 100%;
+    background: linear-gradient(90deg, #00E5FF, #9B59F5);
+    border-radius: 99px;
+  }}
+  .count {{
+    font-size: .7rem;
+    color: #00E5FF;
+    font-weight: 600;
+    min-width: 38px;
+    text-align: right;
+    flex-shrink: 0;
+  }}
+  .unit {{
+    opacity: .45;
+    font-size: .6rem;
+  }}
+</style>
+</head>
+<body>
+  <div class="label">◆ Chunk Breakdown</div>
+  {rows}
+</body>
+</html>"""
+
+
 # ──────────────────────────────────────────────────────────────────
 #  CSS
 # ──────────────────────────────────────────────────────────────────
@@ -178,7 +269,6 @@ html, body, [class*="css"] {
   color: var(--text) !important;
 }
 
-/* ── Aurora background ── */
 .stApp { background: var(--bg) !important; }
 .stApp::before {
   content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
@@ -191,7 +281,6 @@ html, body, [class*="css"] {
 }
 @keyframes aurora { 0% { opacity:.7; transform:scale(1) } 100% { opacity:1; transform:scale(1.04) } }
 
-/* ── Noise texture overlay ── */
 .stApp::after {
   content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
@@ -205,14 +294,12 @@ html, body, [class*="css"] {
   max-width: 1380px !important;
 }
 
-/* ── Sidebar (minimal) ── */
 [data-testid="stSidebar"] {
   background: linear-gradient(175deg, #04080F 0%, #070E1C 100%) !important;
   border-right: 1px solid rgba(0,229,255,0.06) !important;
 }
 [data-testid="stSidebar"] .block-container { padding: 1.5rem 1.1rem !important; }
 
-/* ── Inputs ── */
 [data-testid="stTextInput"] input {
   background: var(--card) !important;
   border: 1px solid var(--border-hi) !important;
@@ -233,7 +320,6 @@ html, body, [class*="css"] {
   text-transform: uppercase; letter-spacing: .14em; color: var(--muted) !important;
 }
 
-/* ── Buttons ── */
 .stButton > button {
   background: linear-gradient(135deg, rgba(0,229,255,.1), rgba(155,89,245,.1)) !important;
   border: 1px solid rgba(0,229,255,.25) !important;
@@ -255,7 +341,6 @@ html, body, [class*="css"] {
   transform: translateY(-1px) !important;
 }
 
-/* ── Delete button variant ── */
 .delete-btn > button {
   background: linear-gradient(135deg, rgba(255,45,120,.1), rgba(255,100,50,.1)) !important;
   border: 1px solid rgba(255,45,120,.35) !important;
@@ -267,7 +352,6 @@ html, body, [class*="css"] {
   box-shadow: 0 0 28px rgba(255,45,120,.18) !important;
 }
 
-/* ── File uploader ── */
 [data-testid="stFileUploader"] {
   background: transparent !important;
   border: none !important;
@@ -289,7 +373,6 @@ html, body, [class*="css"] {
   text-transform: uppercase; letter-spacing: .14em; color: var(--muted) !important;
 }
 
-/* ── Expander ── */
 [data-testid="stExpander"] {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
@@ -304,14 +387,12 @@ html, body, [class*="css"] {
   padding: 1rem 1.25rem !important;
 }
 
-/* ── Status ── */
 [data-testid="stStatus"] {
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius) !important;
 }
 
-/* ── Textarea ── */
 [data-testid="stTextArea"] textarea {
   background: #050D1A !important;
   border: 1px solid rgba(255,255,255,0.1) !important;
@@ -322,19 +403,12 @@ html, body, [class*="css"] {
   line-height: 1.7 !important;
 }
 
-/* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 4px; height: 4px }
 ::-webkit-scrollbar-track { background: var(--bg) }
 ::-webkit-scrollbar-thumb { background: rgba(0,229,255,.15); border-radius: 99px }
 
-/* ── Divider ── */
 hr { border-color: var(--border) !important; }
 
-/* ════════════════════════════
-   CUSTOM COMPONENTS
-   ════════════════════════════ */
-
-/* Topbar */
 .nh-topbar {
   display: flex;
   align-items: center;
@@ -343,9 +417,7 @@ hr { border-color: var(--border) !important; }
   border-bottom: 1px solid var(--border);
   margin-bottom: 2.5rem;
 }
-.nh-logo {
-  display: flex; align-items: center; gap: 10px;
-}
+.nh-logo { display: flex; align-items: center; gap: 10px; }
 .nh-logo-icon {
   width: 34px; height: 34px;
   background: linear-gradient(135deg, var(--cyan), var(--violet));
@@ -356,80 +428,44 @@ hr { border-color: var(--border) !important; }
 }
 .nh-logo-text {
   font-family: 'Syne', sans-serif;
-  font-size: 1.15rem; font-weight: 800;
-  letter-spacing: -.03em;
+  font-size: 1.15rem; font-weight: 800; letter-spacing: -.03em;
   background: linear-gradient(120deg, var(--cyan), var(--violet));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
 .nh-logo-version {
   font-family: 'DM Mono', monospace;
   font-size: .55rem; color: var(--muted);
-  letter-spacing: .1em; text-transform: uppercase;
-  margin-top: 1px;
+  letter-spacing: .1em; text-transform: uppercase; margin-top: 1px;
 }
-.nh-status-bar {
-  display: flex; align-items: center; gap: 12px;
-}
+.nh-status-bar { display: flex; align-items: center; gap: 12px; }
 .nh-status-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: .3rem .85rem;
-  border-radius: 99px;
+  padding: .3rem .85rem; border-radius: 99px;
   font-family: 'DM Mono', monospace;
   font-size: .58rem; letter-spacing: .1em; text-transform: uppercase;
 }
-.nh-status-pill.ready {
-  background: rgba(0,230,118,.07);
-  border: 1px solid rgba(0,230,118,.22);
-  color: #00E676;
-}
-.nh-status-pill.no-index {
-  background: rgba(255,45,120,.07);
-  border: 1px solid rgba(255,45,120,.22);
-  color: #FF2D78;
-}
-.nh-dot {
-  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-}
+.nh-status-pill.ready { background: rgba(0,230,118,.07); border: 1px solid rgba(0,230,118,.22); color: #00E676; }
+.nh-status-pill.no-index { background: rgba(255,45,120,.07); border: 1px solid rgba(255,45,120,.22); color: #FF2D78; }
+.nh-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .nh-dot.ready { background: #00E676; box-shadow: 0 0 7px #00E676; animation: pdot 2.4s ease-in-out infinite; }
 .nh-dot.noindex { background: #FF2D78; box-shadow: 0 0 7px #FF2D78; }
 @keyframes pdot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.7)} }
 
-/* Model tags in topbar */
-.nh-model-tags {
-  display: flex; gap: 8px; flex-wrap: wrap;
-}
+.nh-model-tags { display: flex; gap: 8px; flex-wrap: wrap; }
 .nh-model-tag {
   display: flex; align-items: center; gap: 5px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: .3rem .7rem;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: .3rem .7rem;
 }
-.nh-model-tag-k {
-  font-family: 'DM Mono', monospace;
-  font-size: .55rem; color: var(--muted);
-  letter-spacing: .1em; text-transform: uppercase;
-}
-.nh-model-tag-v {
-  font-family: 'DM Mono', monospace;
-  font-size: .6rem; color: var(--cyan);
-  max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+.nh-model-tag-k { font-family: 'DM Mono', monospace; font-size: .55rem; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+.nh-model-tag-v { font-family: 'DM Mono', monospace; font-size: .6rem; color: var(--cyan); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Hero */
-.nh-hero {
-  margin-bottom: 2.5rem;
-}
+.nh-hero { margin-bottom: 2.5rem; }
 .nh-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(0,229,255,.06);
-  border: 1px solid rgba(0,229,255,.18);
-  border-radius: 99px;
-  padding: .28rem .9rem;
-  font-family: 'DM Mono', monospace;
-  font-size: .6rem; color: var(--cyan);
-  letter-spacing: .12em;
-  margin-bottom: .85rem;
+  background: rgba(0,229,255,.06); border: 1px solid rgba(0,229,255,.18);
+  border-radius: 99px; padding: .28rem .9rem;
+  font-family: 'DM Mono', monospace; font-size: .6rem; color: var(--cyan);
+  letter-spacing: .12em; margin-bottom: .85rem;
 }
 .nh-title {
   font-size: 3.4rem; font-weight: 800; letter-spacing: -.05em; line-height: .95;
@@ -439,226 +475,69 @@ hr { border-color: var(--border) !important; }
   animation: shimmer 7s ease-in-out infinite;
 }
 @keyframes shimmer { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
-.nh-sub {
-  color: var(--muted);
-  font-family: 'DM Mono', monospace;
-  font-size: .8rem; line-height: 1.75;
-  max-width: 580px; margin: .65rem 0 0;
-}
+.nh-sub { color: var(--muted); font-family: 'DM Mono', monospace; font-size: .8rem; line-height: 1.75; max-width: 580px; margin: .65rem 0 0; }
 
-/* ── Main workspace: two-pane ── */
-.nh-workspace {
-  display: grid;
-  grid-template-columns: 1fr 1.8fr;
-  gap: 1.5rem;
-  align-items: start;
-}
+.nh-ingest-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; position: sticky; top: 1.5rem; }
+.nh-panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 1.25rem; }
+.nh-panel-icon { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: .85rem; flex-shrink: 0; }
+.nh-panel-title { font-family: 'Syne', sans-serif; font-size: .88rem; font-weight: 700; color: var(--text); }
+.nh-panel-sub { font-family: 'DM Mono', monospace; font-size: .58rem; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
 
-/* Ingest panel */
-.nh-ingest-panel {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.5rem;
-  position: sticky;
-  top: 1.5rem;
-}
-.nh-panel-header {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 1.25rem;
-}
-.nh-panel-icon {
-  width: 28px; height: 28px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: .85rem; flex-shrink: 0;
-}
-.nh-panel-title {
-  font-family: 'Syne', sans-serif;
-  font-size: .88rem; font-weight: 700;
-  color: var(--text);
-}
-.nh-panel-sub {
-  font-family: 'DM Mono', monospace;
-  font-size: .58rem; color: var(--muted);
-  letter-spacing: .08em; text-transform: uppercase;
-}
-
-/* File count badge */
 .nh-file-count {
   display: inline-flex; align-items: center; gap: 5px;
-  background: rgba(0,229,255,.07);
-  border: 1px solid rgba(0,229,255,.18);
-  border-radius: 99px;
-  padding: .2rem .7rem;
-  font-family: 'DM Mono', monospace;
-  font-size: .58rem; color: var(--cyan);
+  background: rgba(0,229,255,.07); border: 1px solid rgba(0,229,255,.18);
+  border-radius: 99px; padding: .2rem .7rem;
+  font-family: 'DM Mono', monospace; font-size: .58rem; color: var(--cyan);
   letter-spacing: .08em; margin-top: .75rem;
 }
 
-/* Query panel */
-.nh-query-panel {
-  background: var(--card);
-  border: 1px solid var(--border-hi);
-  border-radius: var(--radius);
-  padding: 1.5rem;
-}
+.nh-query-panel { background: var(--card); border: 1px solid var(--border-hi); border-radius: var(--radius); padding: 1.5rem; }
 
-/* Section divider */
-.nh-div {
-  display: flex; align-items: center; gap: .75rem;
-  margin: 2rem 0 1.25rem;
-}
+.nh-div { display: flex; align-items: center; gap: .75rem; margin: 2rem 0 1.25rem; }
 .nh-divline { flex: 1; height: 1px; background: linear-gradient(90deg, var(--dim), transparent) }
-.nh-divtxt {
-  font-family: 'DM Mono', monospace;
-  font-size: .6rem; letter-spacing: .18em;
-  text-transform: uppercase; color: var(--muted); white-space: nowrap;
-}
+.nh-divtxt { font-family: 'DM Mono', monospace; font-size: .6rem; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 
-/* Answer card */
-.nh-answer-wrap {
-  position: relative; border-radius: 18px; padding: 2px;
-  background: linear-gradient(135deg, var(--cyan), var(--emerald), var(--violet), var(--pink));
-  background-size: 300% 300%; animation: gborder 5s ease infinite;
-}
+.nh-answer-wrap { position: relative; border-radius: 18px; padding: 2px; background: linear-gradient(135deg, var(--cyan), var(--emerald), var(--violet), var(--pink)); background-size: 300% 300%; animation: gborder 5s ease infinite; }
 @keyframes gborder { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
-.nh-answer-inner {
-  background: #080E1E; border-radius: 16px;
-  padding: 1.75rem 2rem;
-  font-size: 1.15rem; line-height: 1.85; color: var(--text);
-}
-.nh-answer-lbl {
-  font-family: 'DM Mono', monospace;
-  font-size: .65rem; letter-spacing: .18em;
-  text-transform: uppercase; color: var(--cyan); opacity: .7; margin-bottom: .9rem;
-}
+.nh-answer-inner { background: #080E1E; border-radius: 16px; padding: 1.75rem 2rem; font-size: 1.15rem; line-height: 1.85; color: var(--text); }
+.nh-answer-lbl { font-family: 'DM Mono', monospace; font-size: .65rem; letter-spacing: .18em; text-transform: uppercase; color: var(--cyan); opacity: .7; margin-bottom: .9rem; }
 
-/* Metrics */
-.nh-metric {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 1.1rem .75rem;
-  text-align: center;
-  margin-bottom: .65rem;
-  transition: border-color .2s, box-shadow .2s;
-}
+.nh-metric { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem .75rem; text-align: center; margin-bottom: .65rem; transition: border-color .2s, box-shadow .2s; }
 .nh-metric:hover { border-color: rgba(0,229,255,.15); box-shadow: 0 0 16px rgba(0,229,255,.05) }
-.nh-ml {
-  font-family: 'DM Mono', monospace;
-  font-size: .58rem; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: .35rem;
-}
-.nh-m {
-  font-family: 'Syne', sans-serif;
-  font-size: 1.9rem; font-weight: 800; line-height: 1;
-}
-.nh-gauge-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 1.25rem .75rem .75rem;
-  display: flex; flex-direction: column; align-items: center;
-  margin-bottom: .65rem;
-}
+.nh-ml { font-family: 'DM Mono', monospace; font-size: .58rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: .35rem; }
+.nh-m { font-family: 'Syne', sans-serif; font-size: 1.9rem; font-weight: 800; line-height: 1; }
+.nh-gauge-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem .75rem .75rem; display: flex; flex-direction: column; align-items: center; margin-bottom: .65rem; }
 
-/* Flow */
-.nh-flow-wrap {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 1.25rem 1.5rem 0.85rem;
-  margin: 1.5rem 0 0;
-}
-.nh-flow-lbl {
-  font-family: 'DM Mono', monospace;
-  font-size: .58rem; letter-spacing: .18em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: .85rem;
-}
+.nh-flow-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 1.25rem 1.5rem 0.85rem; margin: 1.5rem 0 0; }
+.nh-flow-lbl { font-family: 'DM Mono', monospace; font-size: .58rem; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); margin-bottom: .85rem; }
 
-/* Hop cards */
-.nh-hop {
-  border-radius: 14px; padding: 1.4rem 1.5rem 1.2rem;
-  margin-bottom: .5rem; position: relative; overflow: hidden;
-  border-width: 1px; border-style: solid;
-}
-.nh-hop-num {
-  font-family: 'DM Mono', monospace;
-  font-size: .65rem; letter-spacing: .18em;
-  text-transform: uppercase; margin-bottom: .4rem; opacity: .7;
-}
+.nh-hop { border-radius: 14px; padding: 1.4rem 1.5rem 1.2rem; margin-bottom: .5rem; position: relative; overflow: hidden; border-width: 1px; border-style: solid; }
+.nh-hop-num { font-family: 'DM Mono', monospace; font-size: .65rem; letter-spacing: .18em; text-transform: uppercase; margin-bottom: .4rem; opacity: .7; }
 .nh-hop-query { font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: .85rem; }
-.nh-hop-answer {
-  font-size: .95rem; line-height: 1.7; color: #A0B4CC;
-  padding: .85rem 1rem; border-radius: 10px;
-  background: rgba(0,0,0,.28); margin-bottom: .85rem;
-  font-family: 'DM Mono', monospace;
-}
+.nh-hop-answer { font-size: .95rem; line-height: 1.7; color: #A0B4CC; padding: .85rem 1rem; border-radius: 10px; background: rgba(0,0,0,.28); margin-bottom: .85rem; font-family: 'DM Mono', monospace; }
 
-/* Chunk display — plain & readable */
-.nh-chunk-block {
-  background: #050D1A;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px;
-  padding: 1rem 1.1rem;
-  margin-bottom: .75rem;
-}
-.nh-chunk-header {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: .6rem;
-  padding-bottom: .5rem;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.nh-chunk-source {
-  font-family: 'DM Mono', monospace;
-  font-size: .7rem; color: var(--muted);
-  letter-spacing: .05em;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px;
-}
-.nh-chunk-score {
-  font-family: 'DM Mono', monospace;
-  font-size: .75rem; font-weight: 600;
-  flex-shrink: 0;
-}
-.nh-chunk-text {
-  font-family: 'DM Mono', monospace;
-  font-size: .88rem; line-height: 1.72; color: #C0D0E4;
-  white-space: pre-wrap; word-break: break-word;
-}
+.nh-chunk-block { background: #050D1A; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: .75rem; }
+.nh-chunk-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .6rem; padding-bottom: .5rem; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.nh-chunk-source { font-family: 'DM Mono', monospace; font-size: .7rem; color: var(--muted); letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.nh-chunk-score { font-family: 'DM Mono', monospace; font-size: .75rem; font-weight: 600; flex-shrink: 0; }
+.nh-chunk-text { font-family: 'DM Mono', monospace; font-size: .88rem; line-height: 1.72; color: #C0D0E4; white-space: pre-wrap; word-break: break-word; }
 
-/* History */
-.nh-hist {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  margin-bottom: .6rem;
-}
+.nh-hist { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: .6rem; }
 .nh-hist-q { font-weight: 700; font-size: .95rem; margin-bottom: .35rem; }
 .nh-hist-a { font-size: .82rem; color: var(--muted); line-height: 1.55; font-family: 'DM Mono', monospace; }
 
-/* Footer */
-.nh-footer {
-  font-family: 'DM Mono', monospace;
-  font-size: .56rem; letter-spacing: .1em;
-  color: var(--dim); text-align: center; margin-top: 4rem;
-  text-transform: uppercase;
-}
+.nh-footer { font-family: 'DM Mono', monospace; font-size: .56rem; letter-spacing: .1em; color: var(--dim); text-align: center; margin-top: 4rem; text-transform: uppercase; }
 
-/* Index info card */
-.nh-index-info {
-  background: rgba(0,230,118,.04);
-  border: 1px solid rgba(0,230,118,.15);
-  border-radius: 10px;
-  padding: .7rem 1rem;
-  margin-top: .85rem;
-  display: flex; align-items: center; gap: 8px;
+.nh-index-info { background: rgba(0,230,118,.04); border: 1px solid rgba(0,230,118,.15); border-radius: 10px; padding: .7rem 1rem; margin-top: .85rem; display: flex; align-items: center; gap: 8px; }
+.nh-index-info-text { font-family: 'DM Mono', monospace; font-size: .6rem; color: #00E676; letter-spacing: .06em; }
+
+.nh-chunk-progress-row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: 'DM Mono', monospace; font-size: .65rem;
+  color: #6B8AB0; padding: .22rem 0;
 }
-.nh-index-info-text {
-  font-family: 'DM Mono', monospace;
-  font-size: .6rem; color: #00E676;
-  letter-spacing: .06em;
-}
+.nh-chunk-progress-row .doc { color: #A0B4CC; overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px; }
+.nh-chunk-progress-row .cnt { color: #00E5FF; font-weight:600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -666,13 +545,18 @@ hr { border-color: var(--border) !important; }
 # ──────────────────────────────────────────────────────────────────
 #  Session state
 # ──────────────────────────────────────────────────────────────────
-for k, v in [("document_store", None), ("history", [])]:
+for k, v in [
+    ("document_store", None),
+    ("history", []),
+    ("chunk_map", {}),
+    ("total_chunks", 0),
+]:
     if k not in st.session_state:
         st.session_state[k] = v
 
 
 # ──────────────────────────────────────────────────────────────────
-#  SIDEBAR  (model info + reset only)
+#  SIDEBAR
 # ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -683,7 +567,7 @@ with st.sidebar:
                 background-clip:text;margin-bottom:.3rem;">⚡ NeuralHop</div>
     <div style="font-family:'DM Mono',monospace;font-size:.55rem;color:#3D5270;
                 letter-spacing:.12em;text-transform:uppercase;margin-bottom:1.5rem;">
-      Multi-Hop RAG Engine 
+      Multi-Hop RAG Engine
     </div>""", unsafe_allow_html=True)
 
     st.markdown(f"""
@@ -693,42 +577,55 @@ with st.sidebar:
         <span style="font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:.1em;
                text-transform:uppercase;color:#3D5270;">Model</span>
         <span style="font-family:'DM Mono',monospace;font-size:.62rem;color:#00E5FF;
-               max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{OLLAMA_MODEL}</span>
+               max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{HF_LLM_MODEL}</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:.22rem 0;">
         <span style="font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:.1em;
                text-transform:uppercase;color:#3D5270;">Embedder</span>
         <span style="font-family:'DM Mono',monospace;font-size:.62rem;color:#00E5FF;
-               max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{OLLAMA_EMBED_MODEL}</span>
+               max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{HF_EMBED_MODEL}</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:.22rem 0;">
         <span style="font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:.1em;
                text-transform:uppercase;color:#3D5270;">Chunk / Overlap</span>
         <span style="font-family:'DM Mono',monospace;font-size:.62rem;color:#00E5FF;">{CHUNK_SIZE} / {CHUNK_OVERLAP}</span>
       </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.22rem 0;
+                  border-top:1px solid rgba(255,255,255,0.05);margin-top:.4rem;padding-top:.6rem;">
+        <span style="font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:.1em;
+               text-transform:uppercase;color:#3D5270;">Total Chunks</span>
+        <span style="font-family:'DM Mono',monospace;font-size:.75rem;color:#FFB300;font-weight:700;">
+          {st.session_state.total_chunks if st.session_state.total_chunks else "—"}
+        </span>
+      </div>
     </div>""", unsafe_allow_html=True)
 
     if st.button("↺ Reset Session"):
         st.session_state.history = []
         st.session_state.document_store = None
+        st.session_state.chunk_map = {}
+        st.session_state.total_chunks = 0
         st.rerun()
 
 
 # ──────────────────────────────────────────────────────────────────
 #  TOP BAR
 # ──────────────────────────────────────────────────────────────────
-is_ready = st.session_state.document_store is not None
+is_ready  = st.session_state.document_store is not None
 dot_cls   = "ready" if is_ready else "noindex"
 pill_cls  = "ready" if is_ready else "no-index"
-pill_txt  = "Index Ready" if is_ready else "No Index"
 
-doc_count_html = ""
-if is_ready:
-    try:
-        n = len(st.session_state.document_store.documents)
-        doc_count_html = f'<span style="font-family:\'DM Mono\',monospace;font-size:.58rem;color:#00E676;opacity:.7;margin-left:6px;">· {n} doc(s)</span>'
-    except Exception:
-        pass
+if is_ready and st.session_state.total_chunks:
+    n_docs   = len(st.session_state.chunk_map)
+    n_chunks = st.session_state.total_chunks
+    pill_txt = (
+        f'Index Ready'
+        f'<span style="font-family:\'DM Mono\',monospace;font-size:.55rem;'
+        f'color:#00E676;opacity:.65;margin-left:7px;">'
+        f'· {n_docs} doc{"s" if n_docs!=1 else ""} · {n_chunks} chunks</span>'
+    )
+else:
+    pill_txt = "No Index" if not is_ready else "Index Ready"
 
 st.markdown(f"""
 <div class="nh-topbar">
@@ -736,23 +633,23 @@ st.markdown(f"""
     <div class="nh-logo-icon">⚡</div>
     <div>
       <div class="nh-logo-text">NeuralHop</div>
-      <div class="nh-logo-version">Multi-Hop RAG · </div>
+      <div class="nh-logo-version">Multi-Hop RAG ·</div>
     </div>
   </div>
   <div class="nh-status-bar">
     <div class="nh-model-tags">
       <div class="nh-model-tag">
         <span class="nh-model-tag-k">LLM</span>
-        <span class="nh-model-tag-v">{OLLAMA_MODEL}</span>
+        <span class="nh-model-tag-v">{HF_LLM_MODEL}</span>
       </div>
       <div class="nh-model-tag">
         <span class="nh-model-tag-k">Embed</span>
-        <span class="nh-model-tag-v">{OLLAMA_EMBED_MODEL}</span>
+        <span class="nh-model-tag-v">{HF_EMBED_MODEL}</span>
       </div>
     </div>
     <div class="nh-status-pill {pill_cls}">
       <span class="nh-dot {dot_cls}"></span>
-      {pill_txt}{doc_count_html}
+      {pill_txt}
     </div>
   </div>
 </div>""", unsafe_allow_html=True)
@@ -771,9 +668,10 @@ st.markdown("""
 
 
 # ──────────────────────────────────────────────────────────────────
-#  WORKSPACE  (two-column: ingest left | query right)
+#  WORKSPACE
 # ──────────────────────────────────────────────────────────────────
 ingest_col, query_col = st.columns([5, 7], gap="large")
+
 
 # ── INGEST PANEL ─────────────────────────────────────────────────
 with ingest_col:
@@ -817,64 +715,145 @@ with ingest_col:
 
     build_disabled = not uploaded_files
     if st.button("⚡ Build Index", disabled=build_disabled):
-        with st.spinner("Chunking & embedding…"):
-            store = DocumentStore(chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP)
-            failed = []
-            for f in uploaded_files:
-                text = extract_text_from_file(f)
-                if text.strip():
-                    store.add_document(doc_id=f.name, text=text)
-                else:
-                    failed.append(f.name)
-            store.build_index()
-            st.session_state.document_store = store
+        store      = DocumentStore()
+        failed     = []
+        chunk_map  = {}
+        total      = len(uploaded_files)
+
+        progress_bar  = st.progress(0, text="Starting ingestion…")
+        status_text   = st.empty()
+        chunk_log     = st.empty()
+
+        running_total = 0
+        for i, f in enumerate(uploaded_files):
+            pct = int(i / total * 100)
+            progress_bar.progress(pct, text=f"Processing file {i+1} / {total}…")
+            status_text.markdown(
+                f'<div class="nh-chunk-progress-row">'
+                f'<span class="doc">✦ {f.name}</span>'
+                f'<span style="color:#FFB300;font-family:\'DM Mono\',monospace;font-size:.65rem;">chunking…</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            text = extract_text_from_file(f)
+            if text.strip():
+                before = len(store._chunks)
+                store.add_document(doc_id=f.name, text=text)
+                after  = len(store._chunks)
+                n_new  = after - before
+                chunk_map[f.name] = n_new
+                running_total    += n_new
+
+                status_text.markdown(
+                    f'<div class="nh-chunk-progress-row">'
+                    f'<span class="doc">✓ {f.name}</span>'
+                    f'<span class="cnt">{n_new} chunks</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                failed.append(f.name)
+                chunk_map[f.name] = 0
+                status_text.markdown(
+                    f'<div class="nh-chunk-progress-row">'
+                    f'<span class="doc" style="color:#FF2D78;">✗ {f.name}</span>'
+                    f'<span style="color:#FF2D78;font-family:\'DM Mono\',monospace;font-size:.65rem;">no text</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            chunk_log.markdown(
+                f'<div style="font-family:\'DM Mono\',monospace;font-size:.62rem;'
+                f'color:#6B8AB0;margin-top:.25rem;">'
+                f'Running total: <span style="color:#FFB300;font-weight:700;">{running_total} chunks</span>'
+                f' across <span style="color:#00E5FF;">{i+1} file{"s" if i+1>1 else ""}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        progress_bar.progress(90, text="Uploading to Qdrant…")
+        status_text.markdown(
+            '<div class="nh-chunk-progress-row">'
+            '<span class="doc">⚡ Building vector index…</span>'
+            '<span style="color:#9B59F5;font-family:\'DM Mono\',monospace;font-size:.65rem;">embedding</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        store.build_index()
+        st.session_state.document_store = store
+        st.session_state.chunk_map      = chunk_map
+        st.session_state.total_chunks   = running_total
+
+        progress_bar.progress(100, text="Index complete!")
+        status_text.empty()
+        chunk_log.empty()
+
         if failed:
             st.warning(f"⚠ Could not extract text from: {', '.join(failed)}")
-        st.success(f"✓ Indexed {len(uploaded_files) - len(failed)} document(s)")
+
+        st.success(
+            f"✓ Indexed **{len(uploaded_files) - len(failed)}** file(s) → "
+            f"**{running_total}** chunks → Qdrant"
+        )
         st.rerun()
 
-    # ── DELETE DOCS BUTTON ────────────────────────────────────────
+    # ── Index live card ───────────────────────────────────────────
     if st.session_state.document_store is not None:
-        st.markdown("""
+        chunk_count = st.session_state.total_chunks
+        doc_count   = len(st.session_state.chunk_map)
+
+        st.markdown(f"""
         <div class="nh-index-info">
           <span style="width:7px;height:7px;background:#00E676;border-radius:50%;
                 box-shadow:0 0 7px #00E676;flex-shrink:0;"></span>
-          <span class="nh-index-info-text">Index is live — ready to query</span>
+          <span class="nh-index-info-text">
+            Index live &nbsp;·&nbsp; {doc_count} doc{"s" if doc_count!=1 else ""}
+            &nbsp;·&nbsp;
+            <span style="color:#FFB300;">{chunk_count} chunks</span>
+            &nbsp;in Qdrant
+          </span>
         </div>""", unsafe_allow_html=True)
+
+        # ── Per-document chunk breakdown (uses components.html to avoid
+        #    Streamlit escaping the inline styles) ──────────────────────
+        if st.session_state.chunk_map:
+            n_rows = len(st.session_state.chunk_map)
+            components.html(
+                chunk_breakdown_html(st.session_state.chunk_map),
+                height=60 + 44 * n_rows,
+                scrolling=False,
+            )
 
         st.markdown("<br/>", unsafe_allow_html=True)
 
         st.markdown('<div class="delete-btn">', unsafe_allow_html=True)
         if st.button("🗑 Delete All Documents"):
             st.session_state.document_store = None
-            st.session_state.history = []
+            st.session_state.history        = []
+            st.session_state.chunk_map      = {}
+            st.session_state.total_chunks   = 0
             st.success("All documents cleared from the index.")
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Chunk config display
     st.markdown(f"""
     <div style="margin-top:1.25rem;padding:.85rem 1rem;
                 background:rgba(0,0,0,.2);border-radius:10px;
                 border:1px solid var(--border);">
       <div style="font-family:'DM Mono',monospace;font-size:.55rem;color:var(--muted);
                   letter-spacing:.14em;text-transform:uppercase;margin-bottom:.6rem;">
-        Chunking Config
+        Chunking Config <span style="opacity:.4;">(semantic)</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">
-        <div style="background:var(--card);border-radius:8px;padding:.5rem .7rem;
-                    border:1px solid var(--border);">
-          <div style="font-family:'DM Mono',monospace;font-size:.52rem;color:var(--muted);
-                      letter-spacing:.1em;text-transform:uppercase;">Chunk Size</div>
-          <div style="font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:800;
-                      color:var(--amber);margin-top:2px;">{CHUNK_SIZE}</div>
+        <div style="background:var(--card);border-radius:8px;padding:.5rem .7rem;border:1px solid var(--border);">
+          <div style="font-family:'DM Mono',monospace;font-size:.52rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;">Strategy</div>
+          <div style="font-family:'Syne',sans-serif;font-size:.9rem;font-weight:800;color:var(--amber);margin-top:2px;">Semantic</div>
         </div>
-        <div style="background:var(--card);border-radius:8px;padding:.5rem .7rem;
-                    border:1px solid var(--border);">
-          <div style="font-family:'DM Mono',monospace;font-size:.52rem;color:var(--muted);
-                      letter-spacing:.1em;text-transform:uppercase;">Overlap</div>
-          <div style="font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:800;
-                      color:var(--violet);margin-top:2px;">{CHUNK_OVERLAP}</div>
+        <div style="background:var(--card);border-radius:8px;padding:.5rem .7rem;border:1px solid var(--border);">
+          <div style="font-family:'DM Mono',monospace;font-size:.52rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;">Threshold</div>
+          <div style="font-family:'Syne',sans-serif;font-size:.9rem;font-weight:800;color:var(--violet);margin-top:2px;">Percentile</div>
         </div>
       </div>
     </div>""", unsafe_allow_html=True)
@@ -899,6 +878,19 @@ with query_col:
         placeholder="e.g. Compare the revenue growth of Company A with the R&D spend of Company B…",
         disabled=not st.session_state.document_store,
     )
+
+    if st.session_state.document_store and st.session_state.total_chunks:
+        st.markdown(
+            f'<div style="display:flex;gap:1.25rem;margin:.5rem 0 .25rem;">'
+            f'<span style="font-family:\'DM Mono\',monospace;font-size:.6rem;color:#3D5270;">'
+            f'Searching across '
+            f'<span style="color:#00E5FF;">{st.session_state.total_chunks} chunks</span>'
+            f' · '
+            f'<span style="color:#00E676;">{len(st.session_state.chunk_map)} doc{"s" if len(st.session_state.chunk_map)!=1 else ""}</span>'
+            f'</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<br/>", unsafe_allow_html=True)
 
@@ -988,6 +980,11 @@ if run and query and st.session_state.document_store:
         <div class="nh-metric">
           <div class="nh-ml">Chunks Retrieved</div>
           <div class="nh-m" style="color:#FFB300;">{len(all_scores)}</div>
+        </div>
+        <div class="nh-metric">
+          <div class="nh-ml">Index Size</div>
+          <div class="nh-m" style="color:#00E676;font-size:1.4rem;">{st.session_state.total_chunks}
+            <span style="font-size:.75rem;opacity:.5;">total</span></div>
         </div>""", unsafe_allow_html=True)
 
     # ── HOP FLOW ─────────────────────────────────────────────────
@@ -1031,11 +1028,16 @@ if run and query and st.session_state.document_store:
 
             for idx, (chunk, sc) in enumerate(zip(res.chunks[:3], res.chunk_scores[:3])):
                 doc = getattr(chunk, "doc_id", f"doc_{idx}")
+                chunk_idx = getattr(chunk, "index", idx)
                 st.markdown(f"""
                 <div class="nh-chunk-block">
                   <div class="nh-chunk-header">
-                    <span class="nh-chunk-source">📄 {doc}</span>
-                    <span class="nh-chunk-score" style="color:{c};">score: {sc:.3f}</span>
+                    <span class="nh-chunk-source" title="{doc}">📄 {doc}</span>
+                    <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+                      <span style="font-family:'DM Mono',monospace;font-size:.6rem;
+                                   color:#3D5270;">#{chunk_idx}</span>
+                      <span class="nh-chunk-score" style="color:{c};">score: {sc:.3f}</span>
+                    </div>
                   </div>
                   <div class="nh-chunk-text">{chunk.text}</div>
                 </div>""", unsafe_allow_html=True)
@@ -1074,5 +1076,5 @@ if st.session_state.history:
 # ──────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="nh-footer">
-  NeuralHop &nbsp;·&nbsp; Powered by LangChain · Ollama · Qdrant
+  NeuralHop &nbsp;·&nbsp; Powered by LangChain · HuggingFace · Qdrant
 </div>""", unsafe_allow_html=True)

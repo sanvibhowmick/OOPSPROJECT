@@ -47,7 +47,7 @@ def run_pipeline(query: str, store: DocumentStore) -> PipelineResult:
             )
             chunks, scores = store.retrieve(sq)
             llm_answer = answer_sub_query(sq, chunks)
-            avg_sim = float(np.mean(scores)) if scores else 0.0
+            avg_sim = float(max(scores)) if scores else 0.0
             
             sub_results.append(SubQueryResult(
                 sub_query=sq,

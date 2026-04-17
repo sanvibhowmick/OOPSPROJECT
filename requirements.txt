@@ -8,3 +8,6 @@ streamlit
 PyMuPDF
 python-dotenv
 rich
+langchain-huggingface 
+langchain-experimental 
+sentence-transformers

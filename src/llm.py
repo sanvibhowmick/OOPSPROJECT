@@ -2,15 +2,26 @@ from __future__ import annotations
 import re
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
+from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+from dotenv import load_dotenv
+import os
 
-from src.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from src.config import HF_LLM_MODEL
 from src.document_store import Chunk
 
+load_dotenv()
+_HF_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")  # CHANGED: read once at module level
 
-def _make_llm(model: str = OLLAMA_MODEL) -> ChatOllama:
-    """Helper to instantiate the ChatOllama model."""
-    return ChatOllama(model=model, base_url=OLLAMA_BASE_URL)
+
+def _make_llm(model: str = HF_LLM_MODEL) -> ChatHuggingFace:
+    endpoint = HuggingFaceEndpoint(
+        repo_id=model,
+        task="text-generation",
+        max_new_tokens=512,
+        huggingfacehub_api_token=_HF_TOKEN,  # CHANGED: pass token explicitly
+    )
+    return ChatHuggingFace(llm=endpoint)
+
 
 # ── Decompose Step ──
 
@@ -23,6 +34,7 @@ Rules:
   - Output ONLY the numbered list, nothing else.
   - Each line format: "1. <sub-question>"
   - Produce 2-5 sub-questions, no more.
+  - Minimize redundancy: Ensure each sub-question targets a distinct piece of information to prevent overlapping queries and duplicate retrieval efforts
   - Each sub-question must be self-contained and independently answerable.\
 """
 
@@ -31,7 +43,7 @@ _decompose_prompt = ChatPromptTemplate.from_messages([
     ("human",  "Complex question:\n{query}"),
 ])
 
-def decompose_query(query: str, model: str = OLLAMA_MODEL) -> list[str]:
+def decompose_query(query: str, model: str = HF_LLM_MODEL) -> list[str]:
     chain = _decompose_prompt | _make_llm(model) | StrOutputParser()
     raw = chain.invoke({"query": query})
 
@@ -61,7 +73,7 @@ _answer_prompt = ChatPromptTemplate.from_messages([
     ("human",  "Context:\n{context}\n\nQuestion: {question}"),
 ])
 
-def answer_sub_query(sub_query: str, chunks: list[Chunk], model: str = OLLAMA_MODEL) -> str:
+def answer_sub_query(sub_query: str, chunks: list[Chunk], model: str = HF_LLM_MODEL) -> str:
     context = "\n\n".join(f"[Chunk {i+1} · doc={c.doc_id}]\n{c.text}" for i, c in enumerate(chunks))
     chain = _answer_prompt | _make_llm(model) | StrOutputParser()
     return chain.invoke({"context": context, "question": sub_query}).strip()
@@ -82,7 +94,7 @@ _aggregate_prompt = ChatPromptTemplate.from_messages([
     ("human",  "Complex question:\n{original_query}\n\n{pairs}"),
 ])
 
-def aggregate_answers(original_query: str, sub_queries: list[str], sub_answers: list[str], model: str = OLLAMA_MODEL) -> str:
+def aggregate_answers(original_query: str, sub_queries: list[str], sub_answers: list[str], model: str = HF_LLM_MODEL) -> str:
     pairs = "\n".join(f"Sub-question {i+1}: {sq}\nAnswer {i+1}: {sa}" for i, (sq, sa) in enumerate(zip(sub_queries, sub_answers)))
     chain = _aggregate_prompt | _make_llm(model) | StrOutputParser()
     return chain.invoke({"original_query": original_query, "pairs": pairs}).strip()
