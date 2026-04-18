@@ -1,203 +1,147 @@
 # ⚡ NeuralHop — Multi-Hop RAG Engine
 
-> Ask questions that span multiple documents. NeuralHop decomposes your query into reasoning hops, retrieves evidence from each, and synthesises a final answer — all running locally.
+NeuralHop is a **multi-hop retrieval-augmented generation (RAG)** system with a Streamlit UI. Instead of treating your question as a single lookup, it breaks complex queries into atomic sub-questions, retrieves evidence for each one independently, answers them individually, and then synthesises everything into a single coherent response. This lets it reason across multiple documents and connect information that no single chunk would contain on its own.
 
 ---
 
-## 📋 Table of Contents
-
-- [How It Works](#how-it-works)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Running the App](#running-the-app)
-- [Project Structure](#project-structure)
-
-
----
-
-## How It Works
+## How it works
 
 ```
-Your Query
+Your query
     │
     ▼
-┌─────────────────────┐
-│  Query Decomposer   │  → breaks query into N atomic sub-queries
-└─────────────────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼  (for each sub-query)
-┌────────┐  ┌────────┐
-│Retrieve│  │  LLM   │  → fetch top-k chunks → answer sub-query
-└────────┘  └────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  Answer Aggregator  │  → synthesise all hop answers into final response
-└─────────────────────┘
+┌─────────────────────────┐
+│  Query Decomposition    │  LLM splits the question into 2–5 sub-questions
+└────────────┬────────────┘
+             │  (for each sub-question)
+             ▼
+┌─────────────────────────┐
+│  Semantic Retrieval     │  Qdrant vector search finds the most relevant chunks
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│  Sub-Query Answering    │  LLM answers each sub-question from its retrieved chunks
+└────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│  Answer Aggregation     │  LLM synthesises all sub-answers into a final response
+└─────────────────────────┘
 ```
 
-1. **Ingest** — Upload `.txt` or `.pdf` files. They are chunked and embedded locally via Ollama.
-2. **Index** — Chunks are stored in a Qdrant vector database for similarity search.
-3. **Query** — Your question is split into sub-queries. Each hop retrieves relevant chunks and gets an LLM answer.
-4. **Synthesise** — All hop answers are aggregated into one final response.
+**Models used**
+- LLM: `Qwen/Qwen2.5-7B-Instruct` (via HuggingFace Inference API)
+- Embeddings: `BAAI/bge-base-en-v1.5` (via HuggingFace Inference API)
+- Vector store: Qdrant Cloud (or local Qdrant)
+
+**Chunking strategy:** Semantic chunking with a percentile breakpoint threshold — chunks are split at natural semantic boundaries rather than fixed character counts.
+
+---
+
+## Project structure
+
+```
+.
+├── app.py                  # Streamlit UI entry point
+├── requirements.txt
+├── .env                    # secrets (never commit this)
+└── src/
+    ├── config.py           # model names, chunk settings, TOP_K
+    ├── document_store.py   # ingestion, embedding, Qdrant indexing & retrieval
+    ├── llm.py              # decompose / answer / aggregate LangChain chains
+    ├── pipeline.py         # CLI-friendly pipeline that wires everything together
+    └── utils.py            # shared Rich console
+```
 
 ---
 
 ## Prerequisites
 
-Make sure you have all of the following installed before starting.
-
-### 1. Python 3.10+
-
-```bash
-python --version   # should be 3.10 or higher
-```
-
-Download from [python.org](https://www.python.org/downloads/) if needed.
+- Python **3.10+**
+- A [HuggingFace](https://huggingface.co/settings/tokens) account with an API token that has **Inference API** access
+- A [Qdrant](https://cloud.qdrant.io/) Cloud cluster **or** Docker for a local Qdrant instance
 
 ---
 
-### 2. Ollama (Local LLM Runner)
+## Setup
 
-Ollama lets you run LLMs and embedding models entirely on your machine — no API key needed.
-
-👉 **[Download Ollama from ollama.com](https://ollama.com/download)**
-
-After installing, pull the models NeuralHop uses:
+### 1 — Clone the repo
 
 ```bash
-# LLM for reasoning and answering
-ollama pull llama3
-
-# Embedding model for vector search
-ollama pull nomic-embed-text
+git clone https://github.com/your-org/neuralhop.git
+cd neuralhop
 ```
 
-Confirm Ollama is running:
+### 2 — Create and activate a virtual environment
 
 ```bash
-ollama list   # should list your downloaded models
+# Create the venv
+python -m venv .venv
+
+# Activate — macOS / Linux
+source .venv/bin/activate
+
+# Activate — Windows (PowerShell)
+.venv\Scripts\Activate.ps1
 ```
 
-> You can swap these for any other Ollama-compatible models — just update `src/config.py`.
-
----
-
-### 3. Qdrant (Vector Database)
-
-Qdrant stores your document embeddings.:
-
-
-#### Qdrant Cloud 
-
-1. Sign up at [cloud.qdrant.io](https://cloud.qdrant.io)
-2. Create a cluster and copy your **API key** and **cluster URL**
-
----
-
-## Installation
+### 3 — Install dependencies
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/sanvibhowmick/OOPSPROJECT.git
-cd OOPSPROJECT
 
-# 2. Create and activate a virtual environment
-python -m venv venv
-
-# On macOS / Linux:
-source venv/bin/activate
-
-# On Windows:
-venv\Scripts\activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
----
+> **PDF support:** `pymupdf` is listed in `requirements.txt` and handles most PDFs well. If it fails to install on your platform, use `pdfplumber` instead — both work transparently.
 
-## Configuration
-
-All settings live in **`src/config.py`**. Open it and adjust to your setup:
-
-```python
-# ── Ollama models ──────────────────────────────────────────
-OLLAMA_MODEL        = "llama3"           # LLM used for reasoning
-OLLAMA_EMBED_MODEL  = "nomic-embed-text" # Embedding model
-
-# ── Chunking ───────────────────────────────────────────────
-CHUNK_SIZE    = 512   # characters per chunk
-CHUNK_OVERLAP = 64    # overlap between consecutive chunks
-
-
-```
-
-### Environment Variables (for Qdrant Cloud)
+### 4 — Configure environment variables
 
 Create a `.env` file in the project root:
 
 ```env
-QDRANT_URL=https://your-cluster-id.qdrant.io
-QDRANT_API_KEY=your-secret-api-key-here
+# HuggingFace Inference API token
+HUGGINGFACEHUB_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Qdrant Cloud
+QDRANT_URL=https://<your-cluster-id>.us-east4-0.gcp.cloud.qdrant.io
+QDRANT_API_KEY=your_qdrant_api_key
 ```
 
 
 
 
----
 
-## Running the App
+### 5 — Run the app
 
 ```bash
 streamlit run app.py
 ```
 
-The app will open at **[http://localhost:8501](http://localhost:8501)**.
-
-**Workflow inside the app:**
-1. Upload one or more `.txt` or `.pdf` files in the left panel
-2. Click **⚡ Build Index** to chunk and embed your documents
-3. Type your question in the right panel
-4. Click **⚡ Analyze Query** and watch the hops unfold
-5. Use **🗑 Delete All Documents** to clear the index and start fresh
+Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ---
 
-## Project Structure
+## Usage
 
-```
-neuralhop/
-│
-├── app.py                  # Streamlit UI — main entry point
-│
-├── src/
-│   ├── config.py           # Model names, chunk settings
-│   ├── document_store.py   # Chunking, embedding, Qdrant index management
-│   ├── llm.py              # Query decomposition, sub-query answering, aggregation
-│   └── pipeline.py         # Data classes: SubQueryResult, PipelineResult
-│
-├── requirements.txt        # Python dependencies
-├── .env                    # ← YOUR SECRETS (never commit this)
-├── .gitignore              # Excludes .env and other sensitive files
-└── README.md
-```
+1. **Upload documents** — drag `.txt` or `.pdf` files into the upload panel on the left.
+2. **Build the index** — click **⚡ Build Index**. Each file is semantically chunked, embedded, and uploaded to Qdrant. A chunk breakdown is shown when complete.
+3. **Ask a question** — type a complex, multi-document question in the query panel and click **⚡ Analyze Query**.
+4. **Explore results** — the UI shows the synthesised answer, a confidence gauge, the full reasoning chain with per-hop retrieved chunks, and a scrollable query history.
 
 ---
 
+## Configuration
 
+All tuneable knobs live in `src/config.py`:
 
+| Setting | Default | Description |
+|---|---|---|
+| `HF_LLM_MODEL` | `Qwen/Qwen2.5-7B-Instruct` | HuggingFace model for generation |
+| `HF_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | HuggingFace model for embeddings |
+| `TOP_K_CHUNKS` | `3` | Chunks retrieved per sub-query |
+| `CHUNK_SIZE` | `300` | Reference size (SemanticChunker uses percentile, not fixed size) |
+| `CHUNK_OVERLAP` | `50` | Reference overlap (not used by SemanticChunker directly) |
 
-
-## Tech Stack
-
-| Component | Tool |
-|-----------|------|
-| UI | [Streamlit](https://streamlit.io) |
-| LLM + Embeddings | [Ollama](https://ollama.com) |
-| Vector Store | [Qdrant](https://qdrant.tech) |
-| PDF Parsing | PyMuPDF|
+The embedding batch size (`EMBED_BATCH_SIZE = 32`) and retry behaviour (`EMBED_RETRY`, `EMBED_BACKOFF`) can be tuned at the top of `src/document_store.py`.
 
 ---
+

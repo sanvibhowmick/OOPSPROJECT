@@ -6,7 +6,6 @@ from langchain_huggingface import HuggingFaceEndpointEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from qdrant_client.models import Distance
 from dotenv import load_dotenv
-from concurrent.futures import ThreadPoolExecutor, Future
 import os
 import time
 from typing import List
@@ -21,26 +20,17 @@ from src.utils import console
 
 
 # ──────────────────────────────────────────────────────────────────
-#  Batched + pipelined embedding wrapper
+#  Batched embedding wrapper
 #
 #  Problem:  SemanticChunker sends ALL sentences in one embed call.
 #            Large docs → payload too big / HF rate-limit.
 #
-#  Fix 1:   Split into fixed-size batches (EMBED_BATCH_SIZE).
-#  Fix 2:   Pipeline — while batch N is in-flight over HTTP,
-#            batch N+1 is already being prepared and submitted.
-#            This hides network RTT behind CPU work and cuts
-#            total wall-time by ~(n_batches-1) * RTT.
-#
-#  Thread safety: HuggingFaceEndpointEmbeddings uses requests
-#  which is thread-safe per-session, so parallel calls are fine.
+#  Fix:     Split into fixed-size batches (EMBED_BATCH_SIZE).
 # ──────────────────────────────────────────────────────────────────
 
-EMBED_BATCH_SIZE    = 32    # sentences per HTTP call — tune per HF tier
-EMBED_MAX_INFLIGHT  = 2     # batches in-flight simultaneously
-                            # (keep low to avoid rate-limits; 2 is sweet spot)
-EMBED_RETRY         = 3     # retries per batch on transient failure
-EMBED_BACKOFF       = 2.0   # base back-off seconds (multiplied by attempt#)
+EMBED_BATCH_SIZE = 32   # sentences per HTTP call — tune per HF tier
+EMBED_RETRY      = 3    # retries per batch on transient failure
+EMBED_BACKOFF    = 2.0  # base back-off seconds (multiplied by attempt#)
 
 
 def _embed_batch_with_retry(
@@ -49,7 +39,7 @@ def _embed_batch_with_retry(
     batch_num: int,
     n_batches: int,
 ) -> List[List[float]]:
-    """Embed one batch, retrying on transient errors.  Runs in a worker thread."""
+    """Embed one batch, retrying on transient errors."""
     for attempt in range(1, EMBED_RETRY + 1):
         try:
             result = base.embed_documents(batch)
@@ -74,11 +64,8 @@ def _embed_batch_with_retry(
 
 class BatchedEmbeddings:
     """
-    Wraps HuggingFaceEndpointEmbeddings with:
-      • Fixed-size batching  — no more oversized payloads
-      • Pipelined dispatch   — next batch is submitted while current
-                               batch is waiting for the HF response,
-                               hiding network latency behind CPU work
+    Wraps HuggingFaceEndpointEmbeddings with fixed-size batching
+    to avoid oversized payloads and HF rate-limits.
 
     All other attributes/methods forward to the base object so
     SemanticChunker and QdrantVectorStore need no changes.
@@ -88,11 +75,9 @@ class BatchedEmbeddings:
         self,
         base: HuggingFaceEndpointEmbeddings,
         batch_size: int = EMBED_BATCH_SIZE,
-        max_inflight: int = EMBED_MAX_INFLIGHT,
     ) -> None:
-        self._base        = base
-        self._batch_size  = batch_size
-        self._max_inflight = max_inflight
+        self._base       = base
+        self._batch_size = batch_size
 
     # ── transparent passthrough ───────────────────────────────────
     def __getattr__(self, name: str):
@@ -102,7 +87,7 @@ class BatchedEmbeddings:
     def embed_query(self, text: str) -> List[float]:
         return self._base.embed_query(text)
 
-    # ── pipelined bulk embed (SemanticChunker + Qdrant indexing) ──
+    # ── sequential batched embed (SemanticChunker + Qdrant indexing) ──
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
@@ -116,44 +101,20 @@ class BatchedEmbeddings:
 
         console.print(
             f"  [dim]Embedding [bold]{total}[/bold] sentences → "
-            f"{n_batches} batches of ≤{self._batch_size}, "
-            f"max {self._max_inflight} in-flight[/dim]"
+            f"{n_batches} batches of ≤{self._batch_size}[/dim]"
         )
 
-        # Results must come back in order; futures preserve submission order.
-        results: List[List[List[float]]] = [None] * n_batches  # type: ignore[list-item]
-
-        with ThreadPoolExecutor(max_workers=self._max_inflight) as pool:
-            # sliding window: keep up to max_inflight futures alive
-            pending: list[tuple[int, Future]] = []
-
-            for idx, batch in enumerate(slices):
-                # Submit this batch immediately — it starts while earlier
-                # batches are still waiting on the network.
-                future = pool.submit(
-                    _embed_batch_with_retry,
-                    self._base, batch, idx + 1, n_batches,
-                )
-                pending.append((idx, future))
-
-                # If we've hit the concurrency cap, drain the oldest future
-                # before submitting more.  This bounds memory and respects
-                # HF rate-limits.
-                if len(pending) >= self._max_inflight:
-                    drain_idx, drain_future = pending.pop(0)
-                    results[drain_idx] = drain_future.result()  # blocks until done
-
-            # Drain whatever is still in-flight
-            for drain_idx, drain_future in pending:
-                results[drain_idx] = drain_future.result()
+        results: List[List[List[float]]] = []
+        for idx, batch in enumerate(slices):
+            results.append(
+                _embed_batch_with_retry(self._base, batch, idx + 1, n_batches)
+            )
 
         # Flatten: [[vec, vec, …], [vec, vec, …], …] → [vec, vec, …]
         return [vec for batch_result in results for vec in batch_result]
 
 
-# ──────────────────────────────────────────────────────────────────
-#  Data model
-# ──────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class Chunk:
@@ -162,9 +123,6 @@ class Chunk:
     index: int
 
 
-# ──────────────────────────────────────────────────────────────────
-#  DocumentStore
-# ──────────────────────────────────────────────────────────────────
 
 class DocumentStore:
     def __init__(
@@ -179,32 +137,24 @@ class DocumentStore:
         self.qdrant_api_key = os.getenv("QDRANT_API_KEY", None)
         hf_token            = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
-        # Raw HF embeddings — never call directly on large sentence lists
         _base_embeddings = HuggingFaceEndpointEmbeddings(
             model=embed_model,
             huggingfacehub_api_token=hf_token,
         )
 
-        # Batched wrapper used everywhere (chunker + vector store)
         self._embeddings_fn = BatchedEmbeddings(_base_embeddings, batch_size=embed_batch_size)
 
         self._splitter = SemanticChunker(
-            embeddings=self._embeddings_fn,          # batched, safe for large docs
+            embeddings=self._embeddings_fn,
             breakpoint_threshold_type="percentile",
-            
         )
 
         self._vectorstore: QdrantVectorStore | None = None
         self._chunks: list[Chunk] = []
 
-    # ── ingest ───────────────────────────────────────────────────
+    
 
     def add_document(self, doc_id: str, text: str) -> None:
-        """
-        Split text into semantic chunks.
-        SemanticChunker will call self._embeddings_fn.embed_documents()
-        which now goes through BatchedEmbeddings — safe for any doc size.
-        """
         raw_chunks = self._splitter.split_text(text.strip())
         for idx, chunk_text in enumerate(raw_chunks):
             self._chunks.append(Chunk(doc_id=doc_id, text=chunk_text.strip(), index=idx))
@@ -225,8 +175,6 @@ class DocumentStore:
             for c in self._chunks
         ]
 
-        # QdrantVectorStore.from_documents() calls embed_documents() on the
-        # chunk texts — also goes through BatchedEmbeddings automatically.
         self._vectorstore = QdrantVectorStore.from_documents(
             documents=lc_docs,
             embedding=self._embeddings_fn,
@@ -239,8 +187,7 @@ class DocumentStore:
 
         console.print(f"  [dim][green]✓[/green] Qdrant Cloud Index ready.[/dim]")
 
-    # ── retrieval ────────────────────────────────────────────────
-
+  
     def retrieve(
         self,
         query: str,

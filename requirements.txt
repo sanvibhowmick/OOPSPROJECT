@@ -1,13 +1,29 @@
+# ── LangChain core & integrations ─────────────────────────────────
 langchain>=0.3.0
 langchain-core>=0.3.0
-langchain-ollama>=0.2.0         
-langchain-text-splitters>=0.3.0 
+langchain-text-splitters>=0.3.0
+langchain-huggingface>=0.1.0
+langchain-qdrant>=0.2.0
+langchain-experimental>=0.3.0
+
+# ── Vector store client ───────────────────────────────────────────
+qdrant-client>=1.9.0
+
+# ── HuggingFace inference & embeddings ───────────────────────────
+huggingface-hub>=0.24.0
+sentence-transformers>=3.0.0
+
+# ── PDF parsing ───────────────────────────────────────────────────
+PyMuPDF>=1.24.0
+
+# ── UI ────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── Numerics ──────────────────────────────────────────────────────
 numpy>=1.26.0
-langchain_qdrant
-streamlit
-PyMuPDF
-python-dotenv
-rich
-langchain-huggingface 
-langchain-experimental 
-sentence-transformers
+
+# ── Environment & config ──────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── CLI / terminal output ─────────────────────────────────────────
+rich>=13.7.0

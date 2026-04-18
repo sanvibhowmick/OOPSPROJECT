@@ -3,11 +3,23 @@ import streamlit.components.v1 as components
 import time
 import math
 import numpy as np
+import warnings
+import logging
+import os
+
 
 from src.config import CHUNK_OVERLAP, CHUNK_SIZE, HF_EMBED_MODEL, HF_LLM_MODEL
 from src.document_store import DocumentStore
 from src.llm import decompose_query, answer_sub_query, aggregate_answers
 from src.pipeline import SubQueryResult, PipelineResult
+# 1. This kills the "Accessing __path__" FutureWarnings specifically
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+
+# 2. This stops the "ModuleNotFoundError" logs from the watcher
+logging.getLogger("transformers").setLevel(logging.ERROR)
+
+# 3. Tells Hugging Face to be quiet
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -53,6 +65,8 @@ st.set_page_config(
 HOP_COLORS = ["#00E5FF", "#00E676", "#FFB300", "#FF2D78", "#9B59F5"]
 HOP_DARKS  = ["#001F26", "#00200F", "#1F1600", "#200010", "#100820"]
 HOP_NAMES  = ["cyan", "emerald", "amber", "pink", "violet"]
+
+MAX_CHUNK_PREVIEW = 400   # characters shown per chunk card — tune to taste
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -586,9 +600,8 @@ with st.sidebar:
                max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{HF_EMBED_MODEL}</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:.22rem 0;">
-        <span style="font-family:'DM Mono',monospace;font-size:.55rem;letter-spacing:.1em;
-               text-transform:uppercase;color:#3D5270;">Chunk / Overlap</span>
-        <span style="font-family:'DM Mono',monospace;font-size:.62rem;color:#00E5FF;">{CHUNK_SIZE} / {CHUNK_OVERLAP}</span>
+        
+        
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:.22rem 0;
                   border-top:1px solid rgba(255,255,255,0.05);margin-top:.4rem;padding-top:.6rem;">
@@ -816,8 +829,7 @@ with ingest_col:
           </span>
         </div>""", unsafe_allow_html=True)
 
-        # ── Per-document chunk breakdown (uses components.html to avoid
-        #    Streamlit escaping the inline styles) ──────────────────────
+        # ── Per-document chunk breakdown ──────────────────────────
         if st.session_state.chunk_map:
             n_rows = len(st.session_state.chunk_map)
             components.html(
@@ -1027,8 +1039,18 @@ if run and query and st.session_state.document_store:
                 unsafe_allow_html=True)
 
             for idx, (chunk, sc) in enumerate(zip(res.chunks[:3], res.chunk_scores[:3])):
-                doc = getattr(chunk, "doc_id", f"doc_{idx}")
+                doc       = getattr(chunk, "doc_id", f"doc_{idx}")
                 chunk_idx = getattr(chunk, "index", idx)
+
+                raw_text     = chunk.text
+                is_truncated = len(raw_text) > MAX_CHUNK_PREVIEW
+                preview_text = (raw_text[:MAX_CHUNK_PREVIEW] + "…") if is_truncated else raw_text
+                trunc_badge  = (
+                    f'<span style="font-family:\'DM Mono\',monospace;font-size:.55rem;'
+                    f'color:#3D5270;letter-spacing:.08em;">+{len(raw_text) - MAX_CHUNK_PREVIEW} chars</span>'
+                    if is_truncated else ""
+                )
+
                 st.markdown(f"""
                 <div class="nh-chunk-block">
                   <div class="nh-chunk-header">
@@ -1037,9 +1059,10 @@ if run and query and st.session_state.document_store:
                       <span style="font-family:'DM Mono',monospace;font-size:.6rem;
                                    color:#3D5270;">#{chunk_idx}</span>
                       <span class="nh-chunk-score" style="color:{c};">score: {sc:.3f}</span>
+                      {trunc_badge}
                     </div>
                   </div>
-                  <div class="nh-chunk-text">{chunk.text}</div>
+                  <div class="nh-chunk-text">{preview_text}</div>
                 </div>""", unsafe_allow_html=True)
 
     st.session_state.history.append(

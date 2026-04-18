@@ -10,7 +10,7 @@ from src.config import HF_LLM_MODEL
 from src.document_store import Chunk
 
 load_dotenv()
-_HF_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")  # CHANGED: read once at module level
+_HF_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")  
 
 
 def _make_llm(model: str = HF_LLM_MODEL) -> ChatHuggingFace:
@@ -18,7 +18,7 @@ def _make_llm(model: str = HF_LLM_MODEL) -> ChatHuggingFace:
         repo_id=model,
         task="text-generation",
         max_new_tokens=512,
-        huggingfacehub_api_token=_HF_TOKEN,  # CHANGED: pass token explicitly
+        huggingfacehub_api_token=_HF_TOKEN,  
     )
     return ChatHuggingFace(llm=endpoint)
 
