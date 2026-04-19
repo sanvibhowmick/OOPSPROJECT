@@ -4,6 +4,19 @@ NeuralHop is a **multi-hop retrieval-augmented generation (RAG)** system with a 
 
 ---
 
+## 🌿 Branches
+
+This repository has two versions:
+
+| Branch | LLM & Embeddings | Requires |
+|---|---|---|
+| **`api`** ← **you are here** | HuggingFace Inference API (cloud) | HF API token + Qdrant |
+| `main` | Ollama (local models, runs fully offline) | Ollama installed locally + Qdrant |
+
+> **`api` branch** uses `Qwen2.5-7B-Instruct` and `BAAI/bge-base-en-v1.5` served via the HuggingFace Inference API — no local GPU required. If you want to run everything offline without any API keys, switch to the `main` branch.
+
+---
+
 ## How it works
 
 ```
@@ -43,7 +56,7 @@ Your query
 .
 ├── app.py                  # Streamlit UI entry point
 ├── requirements.txt
-├── .env                    # secrets (never commit this)
+├── .env                    # secrets 
 └── src/
     ├── config.py           # model names, chunk settings, TOP_K
     ├── document_store.py   # ingestion, embedding, Qdrant indexing & retrieval
@@ -64,11 +77,12 @@ Your query
 
 ## Setup
 
-### 1 — Clone the repo
+### 1 — Clone the repo and switch to the `api` branch
 
 ```bash
 git clone https://github.com/your-org/neuralhop.git
 cd neuralhop
+git checkout api
 ```
 
 ### 2 — Create and activate a virtual environment
@@ -87,7 +101,6 @@ source .venv/bin/activate
 ### 3 — Install dependencies
 
 ```bash
-
 pip install -r requirements.txt
 ```
 
@@ -95,7 +108,7 @@ pip install -r requirements.txt
 
 ### 4 — Configure environment variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (never commit this):
 
 ```env
 # HuggingFace Inference API token
@@ -106,9 +119,9 @@ QDRANT_URL=https://<your-cluster-id>.us-east4-0.gcp.cloud.qdrant.io
 QDRANT_API_KEY=your_qdrant_api_key
 ```
 
-
-
-
+> **Where to get these:**
+> - HuggingFace token → [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) — create a token with **Inference API** access
+> - Qdrant URL + API key → [cloud.qdrant.io](https://cloud.qdrant.io) — create a free cluster and copy the endpoint URL and API key from the dashboard
 
 ### 5 — Run the app
 
@@ -144,4 +157,3 @@ All tuneable knobs live in `src/config.py`:
 The embedding batch size (`EMBED_BATCH_SIZE = 32`) and retry behaviour (`EMBED_RETRY`, `EMBED_BACKOFF`) can be tuned at the top of `src/document_store.py`.
 
 ---
-
