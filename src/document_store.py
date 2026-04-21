@@ -182,7 +182,7 @@ class DocumentStore:
             api_key=self.qdrant_api_key,
             collection_name="rag_documents",
             force_recreate=True,
-            distance=Distance.DOT,
+            distance=Distance.COSINE,
         )
 
         console.print(f"  [dim][green]✓[/green] Qdrant Cloud Index ready.[/dim]")
