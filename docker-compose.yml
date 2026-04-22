@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  neuralhop:
+    build: .                        # build from the Dockerfile in this folder
+    image: neuralhop:latest
+    ports:
+      - "8501:8501"                 # your laptop:container
+    env_file:
+      - .env                        # loads your secrets at runtime, not baked in
+    volumes:
+      - ./data:/app/data            # optional: persist uploaded docs
+    restart: unless-stopped
